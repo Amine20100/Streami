@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var tokenInput = ""
     @State private var regionInput = ""
     @State private var showingRemoveConfirmation = false
+    @State private var showingClearProgressConfirmation = false
 
     private var isRegionValid: Bool {
         regionInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -19,16 +20,16 @@ struct SettingsView: View {
                     SecureField("TMDB v3 key or v4 Read Access Token", text: $tokenInput, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("Paste your TMDB v3 API key or v4 Read Access Token. It is stored securely in this device's Keychain.")
+                    Text("A default API key is pre-configured. You can use your own key from TMDB if preferred.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     TextField("Country code", text: $regionInput)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                    Text("Two-letter region for local streaming availability, such as US or GB.")
+                    Text("Two-letter region for local streaming availability (auto-detected from device).")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Link("Get a token from TMDB", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                    Link("Get your own token from TMDB", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
                         .font(.footnote.weight(.medium))
                 }
 
@@ -48,6 +49,35 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Streaming Sources") {
+                    Toggle("Auto-select best server", isOn: Binding(
+                        get: { services.streamingSources.autoSelectBestSource },
+                        set: { services.streamingSources.setAutoSelect($0) }
+                    ))
+                    Text("Automatically picks the fastest, most reliable source based on health checks.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Text("Manual source selection (used when auto-select is off):")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+
+                    ForEach(services.streamingSources.sources) { source in
+                        SourceToggleRow(source: source) { updatedSource in
+                            services.streamingSources.updateSource(updatedSource)
+                        }
+                    }
+
+                    if !services.streamingSources.watchProgress.isEmpty {
+                        Section {
+                            Button("Clear Watch Progress", role: .destructive) {
+                                showingClearProgressConfirmation = true
+                            }
+                        }
+                    }
+                }
+
                 Section("Availability") {
                     Label("Licensed provider listings are filtered by \(services.settings.regionCode).", systemImage: "globe")
                         .font(.footnote)
@@ -58,6 +88,9 @@ struct SettingsView: View {
 
                 Section {
                     Text("Streami uses TMDB for movie and television metadata. TMDB does not provide full-length video streams.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("Streaming sources are third-party embed providers. Availability varies by region and content.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } header: {
@@ -93,6 +126,66 @@ struct SettingsView: View {
                     dismiss()
                 }
             }
+            .confirmationDialog("Clear all watch progress? This cannot be undone.", isPresented: $showingClearProgressConfirmation, titleVisibility: .visible) {
+                Button("Clear All Progress", role: .destructive) {
+                    services.streamingSources.clearAllProgress()
+                }
+            }
         }
+    }
+}
+
+private struct SourceToggleRow: View {
+    let source: StreamingSource
+    let onUpdate: (StreamingSource) -> Void
+
+    var body: some View {
+        HStack {
+            Image(systemName: source.icon)
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.name)
+                    .font(.system(size: 16, weight: .medium))
+
+                HStack(spacing: 8) {
+                    if source.supportsMovies {
+                        Label("Movies", systemImage: "film")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if source.supportsTV {
+                        Label("TV", systemImage: "tv")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if source.supportsAnime {
+                        Label("Anime", systemImage: "sparkles")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let health = services.streamingSources.sourceHealthStatus[source.id] {
+                        Label(health.isHealthy ? "✓ Healthy" : "⚠ Issues", systemImage: health.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(health.isHealthy ? .green : .orange)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { source.isEnabled },
+                set: { newValue in
+                    var updated = source
+                    updated.isEnabled = newValue
+                    onUpdate(updated)
+                }
+            ))
+            .labelsHidden()
+        }
+        .padding(.vertical, 4)
     }
 }

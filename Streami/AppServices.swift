@@ -83,66 +83,227 @@ struct WatchProgress: Codable, Hashable {
 @MainActor
 final class StreamingSourceManager {
     static let shared = StreamingSourceManager()
-
+    
     private let sourcesKey = "streami.streaming.sources"
     private let progressKey = "streami.watch.progress"
-
+    private let autoSelectKey = "streami.streaming.autoSelect"
+    private let lastHealthCheckKey = "streami.streaming.lastHealthCheck"
+    
     var sources: [StreamingSource] = []
     var watchProgress: [String: WatchProgress] = [:]
-
+    var autoSelectBestSource: Bool = true
+    private var sourceHealth: [String: SourceHealth] = [:]
+    
+    var sourceHealthStatus: [String: SourceHealth] {
+        sourceHealth
+    }
+    
     private init() {
         loadSources()
         loadProgress()
+        loadAutoSelectSetting()
+        Task { await performHealthCheckIfNeeded() }
     }
-
-    func loadSources() {
-        if let data = UserDefaults.standard.data(forKey: sourcesKey),
-           let decoded = try? JSONDecoder().decode([StreamingSource].self, from: data) {
-            sources = decoded
+    
+    // MARK: - Auto Server Selection
+    
+    struct SourceHealth: Codable {
+        let sourceID: String
+        var isHealthy: Bool
+        var responseTimeMs: Double
+        var lastChecked: Date
+        var consecutiveFailures: Int
+    }
+    
+    func loadAutoSelectSetting() {
+        autoSelectBestSource = UserDefaults.standard.object(forKey: autoSelectKey) as? Bool ?? true
+    }
+    
+    func setAutoSelect(_ enabled: Bool) {
+        autoSelectBestSource = enabled
+        UserDefaults.standard.set(enabled, forKey: autoSelectKey)
+    }
+    
+    func getBestSource(for type: String) -> StreamingSource? {
+        guard autoSelectBestSource else {
+            return enabledSources(for: type).first
+        }
+        
+        let enabled = enabledSources(for: type)
+        guard !enabled.isEmpty else { return nil }
+        
+        // Sort by health (healthy first), then by priority, then by response time
+        return enabled.sorted { lhs, rhs in
+            let lhsHealth = sourceHealth[lhs.id]
+            let rhsHealth = sourceHealth[rhs.id]
+            
+            let lhsHealthy = lhsHealth?.isHealthy ?? true
+            let rhsHealthy = rhsHealth?.isHealthy ?? true
+            
+            if lhsHealthy != rhsHealthy {
+                return lhsHealthy && !rhsHealthy
+            }
+            
+            if lhs.priority != rhs.priority {
+                return lhs.priority < rhs.priority
+            }
+            
+            let lhsTime = lhsHealth?.responseTimeMs ?? Double.infinity
+            let rhsTime = rhsHealth?.responseTimeMs ?? Double.infinity
+            return lhsTime < rhsTime
+        }.first
+    }
+    
+    func getBestSourceURL(for title: TMDBTitle, season: Int? = nil, episode: Int? = nil) -> (URL, StreamingSource)? {
+        let type = title.type == "movie" ? "movie" : "tv"
+        guard let source = getBestSource(for: type) else { return nil }
+        guard let url = getEmbedURL(for: source.id, title: title, season: season, episode: episode) else { return nil }
+        return (url, source)
+    }
+    
+    func recordSourceResult(sourceID: String, success: Bool, responseTime: Double) {
+        var health = sourceHealth[sourceID] ?? SourceHealth(
+            sourceID: sourceID,
+            isHealthy: true,
+            responseTimeMs: responseTime,
+            lastChecked: Date(),
+            consecutiveFailures: 0
+        )
+        
+        health.lastChecked = Date()
+        health.responseTimeMs = responseTime
+        
+        if success {
+            health.consecutiveFailures = 0
+            health.isHealthy = true
         } else {
-            sources = StreamingSource.allSources
-            saveSources()
+            health.consecutiveFailures += 1
+            if health.consecutiveFailures >= 3 {
+                health.isHealthy = false
+            }
+        }
+        
+        sourceHealth[sourceID] = health
+        saveHealth()
+    }
+    
+    private func loadHealth() {
+        if let data = UserDefaults.standard.data(forKey: "streami.streaming.health"),
+           let decoded = try? JSONDecoder().decode([SourceHealth].self, from: data) {
+            sourceHealth = Dictionary(uniqueKeysWithValues: decoded.map { ($0.sourceID, $0) })
         }
     }
-
-    func saveSources() {
-        if let data = try? JSONEncoder().encode(sources) {
-            UserDefaults.standard.set(data, forKey: sourcesKey)
+    
+    private func saveHealth() {
+        if let data = try? JSONEncoder().encode(Array(sourceHealth.values)) {
+            UserDefaults.standard.set(data, forKey: "streami.streaming.health")
         }
     }
-
-    func toggleSource(_ sourceID: String) {
-        if let index = sources.firstIndex(where: { $0.id == sourceID }) {
-            sources[index].isEnabled.toggle()
-            saveSources()
+    
+    func performHealthCheckIfNeeded() async {
+        let lastCheck = UserDefaults.standard.object(forKey: lastHealthCheckKey) as? Date ?? .distantPast
+        let interval: TimeInterval = 6 * 60 * 60 // 6 hours
+        
+        guard Date().timeIntervalSince(lastCheck) > interval else { return }
+        await performHealthCheck()
+    }
+    
+    func performHealthCheck() async {
+        UserDefaults.standard.set(Date(), forKey: lastHealthCheckKey)
+        loadHealth()
+        
+        let testTitle = TMDBTitle(id: 533535, title: "Test", overview: nil, posterPath: nil, backdropPath: nil, voteAverage: 0, releaseDate: nil, firstAirDate: nil, mediaType: "movie")
+        
+        for source in sources where source.isEnabled {
+            guard let url = source.movieEmbedURL(tmdbID: testTitle.id, imdbID: nil) else { continue }
+            
+            let start = Date()
+            var success = false
+            
+            do {
+                var request = URLRequest(url: url)
+                request.httpMethod = "HEAD"
+                request.timeoutInterval = 10
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) {
+                    success = true
+                }
+            } catch {
+                success = false
+            }
+            
+            let responseTime = Date().timeIntervalSince(start) * 1000
+            recordSourceResult(sourceID: source.id, success: success, responseTime: responseTime)
         }
     }
-
-    func updateSource(_ source: StreamingSource) {
-        if let index = sources.firstIndex(where: { $0.id == source.id }) {
-            sources[index] = source
-            saveSources()
+    
+    // MARK: - Debounced Progress Saving
+    
+    private var pendingProgress: [String: WatchProgress] = [:]
+    private var progressSaveTimers: [String: Timer] = [:]
+    private let progressSaveDelay: TimeInterval = 5.0 // Save every 5 seconds
+    
+    func updateProgressDebounced(
+        title: TMDBTitle,
+        currentTime: TimeInterval,
+        duration: TimeInterval,
+        season: Int? = nil,
+        episode: Int? = nil,
+        sourceID: String
+    ) {
+        let titleID = (season != nil && episode != nil) ? "\(title.listID)-s\(season!)e\(episode!)" : title.listID
+        let progress = WatchProgress(
+            titleID: titleID,
+            titleType: title.type,
+            tmdbID: title.id,
+            imdbID: title.imdbID,
+            currentTime: currentTime,
+            duration: duration,
+            season: season,
+            episode: episode,
+            lastWatched: Date(),
+            sourceID: sourceID
+        )
+        
+        // Store pending progress
+        pendingProgress[titleID] = progress
+        
+        // Cancel existing timer
+        progressSaveTimers[titleID]?.invalidate()
+        
+        // Schedule debounced save
+        let timer = Timer.scheduledTimer(withTimeInterval: progressSaveDelay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.commitPendingProgress(for: titleID)
+            }
         }
+        progressSaveTimers[titleID] = timer
     }
-
-    func enabledSources(for type: String) -> [StreamingSource] {
-        switch type {
-        case "movie": return sources.filter { $0.supportsMovies && $0.isEnabled }.sorted { $0.priority < $1.priority }
-        case "tv": return sources.filter { $0.supportsTV && $0.isEnabled }.sorted { $0.priority < $1.priority }
-        case "anime": return sources.filter { $0.supportsAnime && $0.isEnabled }.sorted { $0.priority < $1.priority }
-        default: return [] }
-    }
-
-    func getEmbedURL(for sourceID: String, title: TMDBTitle, season: Int? = nil, episode: Int? = nil) -> URL? {
-        guard let source = sources.first(where: { $0.id == sourceID }) else { return nil }
-
-        if title.type == "movie" || (title.type == "tv" && season == nil) {
-            return source.movieEmbedURL(tmdbID: title.id, imdbID: nil)
-        } else if let season, let episode {
-            return source.tvEmbedURL(tmdbID: title.id, imdbID: nil, season: season, episode: episode)
-        } else {
-            return source.tvSeriesEmbedURL(tmdbID: title.id, imdbID: nil)
+    
+    func commitPendingProgress(for titleID: String) {
+        if let progress = pendingProgress.removeValue(forKey: titleID) {
+            watchProgress[titleID] = progress
+            saveProgress()
         }
+        progressSaveTimers[titleID]?.invalidate()
+        progressSaveTimers.removeValue(forKey: titleID)
+    }
+    
+    func commitAllPendingProgress() {
+        for (titleID, progress) in pendingProgress {
+            watchProgress[titleID] = progress
+        }
+        pendingProgress.removeAll()
+        for timer in progressSaveTimers.values {
+            timer.invalidate()
+        }
+        progressSaveTimers.removeAll()
+        saveProgress()
+    }
+    
+    func getPendingProgress(for title: TMDBTitle, season: Int? = nil, episode: Int? = nil) -> WatchProgress? {
+        let titleID = (season != nil && episode != nil) ? "\(title.listID)-s\(season!)e\(episode!)" : title.listID
+        return pendingProgress[titleID] ?? watchProgress[titleID]
     }
 
     func loadProgress() {
@@ -483,8 +644,16 @@ final class DiscoverViewModel {
     private let session: TMDBSession
     private let preferences: AppPreferences
     private(set) var trending: [TMDBTitle] = []
+    private(set) var trendingMovies: [TMDBTitle] = []
+    private(set) var trendingShows: [TMDBTitle] = []
     private(set) var movies: [TMDBTitle] = []
+    private(set) var topRatedMovies: [TMDBTitle] = []
+    private(set) var nowPlayingMovies: [TMDBTitle] = []
+    private(set) var upcomingMovies: [TMDBTitle] = []
     private(set) var shows: [TMDBTitle] = []
+    private(set) var topRatedShows: [TMDBTitle] = []
+    private(set) var onTheAirShows: [TMDBTitle] = []
+    private(set) var airingTodayShows: [TMDBTitle] = []
     private(set) var movieCatalog: [TMDBTitle] = []
     private(set) var showCatalog: [TMDBTitle] = []
     private(set) var movieGenres: [TMDBGenre] = []
@@ -511,14 +680,36 @@ final class DiscoverViewModel {
         errorMessage = nil
         do {
             async let trendingRequest = session.client.trending()
+            async let trendingMoviesRequest = session.client.trending(mediaType: "movie", timeWindow: "week")
+            async let trendingShowsRequest = session.client.trending(mediaType: "tv", timeWindow: "week")
             async let movieRequest = session.client.popularMovies()
+            async let topRatedMoviesRequest = session.client.topRatedMovies()
+            async let nowPlayingRequest = session.client.nowPlayingMovies(region: preferences.regionCode)
+            async let upcomingRequest = session.client.upcomingMovies(region: preferences.regionCode)
             async let showRequest = session.client.popularShows()
-            (trending, movies, shows) = try await (trendingRequest, movieRequest, showRequest)
+            async let topRatedShowsRequest = session.client.topRatedShows()
+            async let onTheAirRequest = session.client.onTheAirShows()
+            async let airingTodayRequest = session.client.airingTodayShows()
+            
+            (trending, trendingMovies, trendingShows, movies, topRatedMovies, nowPlayingMovies, upcomingMovies, shows, topRatedShows, onTheAirShows, airingTodayShows) = try await (
+                trendingRequest, trendingMoviesRequest, trendingShowsRequest,
+                movieRequest, topRatedMoviesRequest, nowPlayingRequest, upcomingRequest,
+                showRequest, topRatedShowsRequest, onTheAirRequest, airingTodayRequest
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
         await loadFilterOptions(region: preferences.regionCode)
+    }
+    
+    func loadMoreTrending(type: String? = nil, timeWindow: String = "week") async -> [TMDBTitle] {
+        guard !session.credential.isEmpty else { return [] }
+        do {
+            return try await session.client.trending(mediaType: type, timeWindow: timeWindow)
+        } catch {
+            return []
+        }
     }
 
     func loadFilterOptions(region: String) async {
@@ -660,6 +851,7 @@ final class DetailViewModel {
     private(set) var isLoadingProviders = true
     private(set) var providerError: String?
     private(set) var recommendations: [TMDBTitle] = []
+    private(set) var similar: [TMDBTitle] = []
     private(set) var recommendationsError: String?
     private(set) var isLoadingRecommendations = true
     private(set) var details: TMDBTitleDetails?
@@ -667,6 +859,14 @@ final class DetailViewModel {
     private(set) var detailsError: String?
     private(set) var isLoadingTrailer = false
     private(set) var imdbID: String?
+    private(set) var videos: [TMDBVideo] = []
+    private(set) var images: TMDBImages?
+    private(set) var reviews: TMDBReviewsPage?
+    private(set) var keywords: TMDBKeywords?
+    private(set) var releaseDates: TMDBReleaseDates?
+    private(set) var contentRatings: TMDBContentRatings?
+    private(set) var translations: TMDBTranslations?
+    private(set) var alternativeTitles: TMDBAlternativeTitles?
 
     init(title: TMDBTitle, session: TMDBSession, preferences: AppPreferences, watchlist: WatchlistStore) {
         self.title = title
@@ -677,6 +877,28 @@ final class DetailViewModel {
 
     var regionCode: String { preferences.regionCode }
     var isSaved: Bool { watchlist.contains(title) }
+    
+    var displayRuntime: String? {
+        guard let runtime = details?.displayRuntime else { return nil }
+        let hours = runtime / 60
+        let minutes = runtime % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
+    }
+    
+    var certification: String? {
+        let region = regionCode.uppercased()
+        return details?.releaseDates?.results?.first(where: { $0.iso3166_1 == region })?.releaseDates?.first(where: { !$0.certification.isEmpty })?.certification
+            ?? details?.releaseDates?.results?.first(where: { $0.iso3166_1 == "US" })?.releaseDates?.first(where: { !$0.certification.isEmpty })?.certification
+    }
+    
+    var directors: [TMDBCastMember] {
+        details?.crew.filter { $0.job == "Director" || $0.job == "Creator" } ?? []
+    }
+    
+    var creators: [TMDBCastMember] {
+        details?.crew.filter { $0.job == "Creator" } ?? []
+    }
 
     func loadSupportingData() async {
         isLoadingProviders = true
@@ -685,10 +907,20 @@ final class DetailViewModel {
         providerError = nil
         recommendationsError = nil
         detailsError = nil
+        
         async let providerRequest = session.client.watchProviders(for: title, region: regionCode)
         async let recommendationRequest = session.client.recommendations(for: title)
+        async let similarRequest = session.client.similar(for: title)
         async let detailsRequest = session.client.details(for: title)
         async let imdbRequest = session.client.fetchExternalIDs(for: title)
+        async let videosRequest = session.client.videos(for: title)
+        async let imagesRequest = session.client.images(for: title)
+        async let reviewsRequest = session.client.reviews(for: title)
+        async let keywordsRequest = session.client.keywords(for: title)
+        async let releaseDatesRequest = session.client.releaseDates(for: title)
+        async let contentRatingsRequest = session.client.contentRatings(for: title)
+        async let translationsRequest = session.client.translations(for: title)
+        async let alternativeTitlesRequest = session.client.alternativeTitles(for: title)
 
         do {
             providerRegion = try await providerRequest
@@ -710,7 +942,14 @@ final class DetailViewModel {
             recommendations = []
             recommendationsError = error.localizedDescription
         }
+        
+        do {
+            similar = try await similarRequest
+        } catch {
+            similar = []
+        }
         isLoadingRecommendations = false
+
         do {
             details = try await detailsRequest
         } catch is CancellationError {
@@ -722,11 +961,23 @@ final class DetailViewModel {
         }
         isLoadingDetails = false
 
-        // Fetch IMDB ID for streaming sources
         do {
             imdbID = try await imdbRequest
         } catch {
             imdbID = nil
+        }
+        
+        do {
+            videos = try await videosRequest
+            images = try await imagesRequest
+            reviews = try await reviewsRequest
+            keywords = try await keywordsRequest
+            releaseDates = try await releaseDatesRequest
+            contentRatings = try await contentRatingsRequest
+            translations = try await translationsRequest
+            alternativeTitles = try await alternativeTitlesRequest
+        } catch {
+            // Optional data, ignore errors
         }
     }
 

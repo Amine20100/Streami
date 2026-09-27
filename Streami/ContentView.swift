@@ -79,12 +79,13 @@ private struct HomeView: View {
     @State private var selectedGenreID: Int?
     @State private var selectedYear: Int?
     @State private var selectedProviderID: Int?
+    @State private var trendingTimeWindow = "week"
 
     private var featuredTitle: TMDBTitle? {
         switch mode {
         case .forYou: services.discover.trending.first
-        case .movies: services.discover.movies.first ?? services.discover.trending.first(where: { $0.type == "movie" })
-        case .series: services.discover.shows.first ?? services.discover.trending.first(where: { $0.type == "tv" })
+        case .movies: services.discover.movies.first ?? services.discover.trendingMovies.first
+        case .series: services.discover.shows.first ?? services.discover.trendingShows.first
         }
     }
 
@@ -134,8 +135,15 @@ private struct HomeView: View {
                     switch mode {
                     case .forYou:
                         MediaShelf(title: "Trending this week", items: services.discover.trending, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Popular movies", items: services.discover.movies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Series worth a night in", items: services.discover.shows, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Trending movies", items: services.discover.trendingMovies, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Trending series", items: services.discover.trendingShows, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Top rated movies", items: services.discover.topRatedMovies, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Now playing", items: services.discover.nowPlayingMovies, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Upcoming movies", items: services.discover.upcomingMovies, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Popular series", items: services.discover.shows, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Top rated series", items: services.discover.topRatedShows, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "On the air", items: services.discover.onTheAirShows, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Airing today", items: services.discover.airingTodayShows, isLoading: services.discover.isLoading)
                         let pickedForYou = services.discover.personalizedTitles(from: services.watchlist.titles)
                         if !pickedForYou.isEmpty {
                             MediaShelf(title: "Picked for you", items: pickedForYou, isLoading: false)
