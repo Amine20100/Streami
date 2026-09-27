@@ -1004,6 +1004,7 @@ struct ReviewCard: View {
         .frame(width: 280)
         .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
+}
 
 // MARK: - TMDB Details Section
 
