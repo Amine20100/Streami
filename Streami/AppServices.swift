@@ -163,7 +163,7 @@ final class WatchlistStore {
     private let collectionPersistence: any WatchlistCollectionPersisting
     private(set) var titles: [TMDBTitle]
     private(set) var collections: [WatchlistCollection]
-    private(set) var activeCollectionID: String {
+    private(set) var activeCollectionID: String = "streami.collection.my-list" {
         didSet { collectionPersistence.saveSelectedID(activeCollectionID) }
     }
 
