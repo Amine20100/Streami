@@ -254,7 +254,7 @@ struct TMDBImage: Decodable, Identifiable {
     }
 }
 
-struct TMDBReviewsPage: Decodable {
+public struct TMDBReviewsPage: Decodable {
     let page: Int
     let results: [TMDBReview]
     let totalPages: Int
@@ -267,7 +267,7 @@ struct TMDBReviewsPage: Decodable {
     }
 }
 
-struct TMDBReview: Decodable, Identifiable {
+public struct TMDBReview: Decodable, Identifiable {
     let id: String
     let author: String
     let authorDetails: TMDBAuthorDetails?
