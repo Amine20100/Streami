@@ -3,7 +3,6 @@ import Observation
 
 typealias TMDBClientFactory = (String) -> any TMDBServicing
 
-#if STREAMI_LICENSED_PLAYBACK_ENABLED
 // MARK: - Streaming Source Models
 
 struct StreamingSource: Identifiable, Hashable, Codable {
@@ -782,4 +781,3 @@ final class AppServices {
         settings = SettingsViewModel(session: session, preferences: preferences, discover: discover, search: search)
     }
 }
-#endif
