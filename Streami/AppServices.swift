@@ -313,7 +313,7 @@ final class DiscoverViewModel {
         isLoading = true
         errorMessage = nil
         do {
-            async let trendingRequest = session.client.trending()
+            async let trendingRequest = session.client.trending(mediaType: nil, timeWindow: "week")
             async let trendingMoviesRequest = session.client.trending(mediaType: "movie", timeWindow: "week")
             async let trendingShowsRequest = session.client.trending(mediaType: "tv", timeWindow: "week")
             async let movieRequest = session.client.popularMovies()
@@ -522,8 +522,8 @@ final class DetailViewModel {
     
     var certification: String? {
         let region = regionCode.uppercased()
-        return details?.releaseDates?.results?.first(where: { $0.iso3166_1 == region })?.releaseDates?.first(where: { !$0.certification.isEmpty })?.certification
-            ?? details?.releaseDates?.results?.first(where: { $0.iso3166_1 == "US" })?.releaseDates?.first(where: { !$0.certification.isEmpty })?.certification
+        return details?.releaseDates?.results?.first(where: { $0.iso3166_1 == region })?.releaseDates?.first(where: { !($0.certification?.isEmpty ?? true) })?.certification
+            ?? details?.releaseDates?.results?.first(where: { $0.iso3166_1 == "US" })?.releaseDates?.first(where: { !($0.certification?.isEmpty ?? true) })?.certification
     }
     
     var directors: [TMDBCastMember] {
@@ -596,7 +596,7 @@ final class DetailViewModel {
         isLoadingDetails = false
 
         do {
-            imdbID = try await imdbRequest
+            imdbID = try await imdbRequest?.imdb_id
         } catch {
             imdbID = nil
         }
