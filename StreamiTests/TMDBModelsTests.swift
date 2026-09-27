@@ -202,7 +202,7 @@ final class TMDBModelsTests: XCTestCase {
       }
       func watchProviders(for title: TMDBTitle, region: String) async throws -> TMDBProviderRegion? { nil }
       func seasonDetails(showID: Int, seasonNumber: Int) async throws -> TMDBSeason {
-        TMDBSeason(id: 1, airDate: nil, episodeCount: nil, name: nil, overview: nil, posterPath: nil, seasonNumber: 1, voteAverage: nil)
+        TMDBSeason(id: 1, airDate: nil, episodeCount: nil, name: nil, overview: nil, posterPath: nil, seasonNumber: 1, voteAverage: nil, episodes: nil)
       }
       func episodeDetails(showID: Int, seasonNumber: Int, episodeNumber: Int) async throws -> TMDBEpisode {
         TMDBEpisode(id: 1, airDate: nil, episodeNumber: 1, name: nil, overview: nil, runtime: nil, seasonNumber: 1, showID: 1, stillPath: nil, voteAverage: nil, voteCount: nil, crew: nil, guestStars: nil)
