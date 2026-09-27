@@ -174,9 +174,15 @@ final class TMDBModelsTests: XCTestCase {
     }
 
     private struct DelayedSearchService: TMDBServicing {
-      func trending() async throws -> [TMDBTitle] { [] }
+      func trending(mediaType: String?, timeWindow: String) async throws -> [TMDBTitle] { [] }
       func popularMovies() async throws -> [TMDBTitle] { [] }
+      func topRatedMovies() async throws -> [TMDBTitle] { [] }
+      func nowPlayingMovies(region: String?) async throws -> [TMDBTitle] { [] }
+      func upcomingMovies(region: String?) async throws -> [TMDBTitle] { [] }
       func popularShows() async throws -> [TMDBTitle] { [] }
+      func topRatedShows() async throws -> [TMDBTitle] { [] }
+      func onTheAirShows() async throws -> [TMDBTitle] { [] }
+      func airingTodayShows() async throws -> [TMDBTitle] { [] }
       func recommendations(for title: TMDBTitle) async throws -> [TMDBTitle] { [] }
       func genres(for type: String) async throws -> [TMDBGenre] { [] }
       func providers(for type: String, region: String) async throws -> [TMDBWatchProvider] { [] }
@@ -185,7 +191,12 @@ final class TMDBModelsTests: XCTestCase {
         TMDBTitleDetails(genres: nil, runtime: nil, episodeRunTime: nil, credits: nil, aggregateCredits: nil)
       }
       func watchProviders(for title: TMDBTitle, region: String) async throws -> TMDBProviderRegion? { nil }
-
+      func seasonDetails(showID: Int, seasonNumber: Int) async throws -> TMDBSeason {
+        TMDBSeason(id: 1, airDate: nil, episodeCount: nil, name: nil, overview: nil, posterPath: nil, seasonNumber: 1, voteAverage: nil)
+      }
+      func episodeDetails(showID: Int, seasonNumber: Int, episodeNumber: Int) async throws -> TMDBEpisode {
+        TMDBEpisode(id: 1, airDate: nil, episodeNumber: 1, name: nil, overview: nil, runtime: nil, seasonNumber: 1, showID: 1, stillPath: nil, voteAverage: nil, voteCount: nil, crew: nil, guestStars: nil)
+      }
       func search(_ query: String) async throws -> [TMDBTitle] {
         if query == "slow" { try await Task.sleep(for: .milliseconds(80)) }
         let data = try JSONSerialization.data(withJSONObject: [
@@ -195,6 +206,29 @@ final class TMDBModelsTests: XCTestCase {
         ])
         return [try JSONDecoder().decode(TMDBTitle.self, from: data)]
       }
-
+      func searchMovies(_ query: String) async throws -> [TMDBTitle] { [] }
+      func searchTV(_ query: String) async throws -> [TMDBTitle] { [] }
+      func searchPeople(_ query: String) async throws -> [TMDBPerson] { [] }
+      func popularPeople() async throws -> [TMDBPerson] { [] }
+      func personDetails(id: Int) async throws -> TMDBPerson {
+        TMDBPerson(id: 1, name: "Test", biography: nil, birthday: nil, deathday: nil, placeOfBirth: nil, knownForDepartment: nil, gender: nil, profilePath: nil, adult: nil, popularity: nil, alsoKnownAs: nil, imdbID: nil, homepage: nil)
+      }
+      func personCredits(id: Int) async throws -> TMDBPersonCredits { TMDBPersonCredits(cast: nil, crew: nil) }
+      func personImages(id: Int) async throws -> TMDBPersonImages { TMDBPersonImages(profiles: nil) }
+      func personExternalIDs(id: Int) async throws -> TMDBPersonExternalIDs { TMDBPersonExternalIDs(imdb_id: nil, facebook_id: nil, instagram_id: nil, twitter_id: nil, tiktok_id: nil, wikipedia_id: nil, freebase_mid: nil, freebase_id: nil, tvrage_id: nil) }
+      func videos(for title: TMDBTitle) async throws -> [TMDBVideo] { [] }
       func trailerURL(for title: TMDBTitle) async throws -> URL? { nil }
+      func fetchExternalIDs(for title: TMDBTitle) async throws -> TMDBExternalIDs? { TMDBExternalIDs(imdb_id: nil, facebook_id: nil, instagram_id: nil, twitter_id: nil, tiktok_id: nil, wikipedia_id: nil) }
+      func enrichWithIMDBID(_ title: TMDBTitle) async throws -> TMDBTitle { title }
+      func images(for title: TMDBTitle) async throws -> TMDBImages { TMDBImages(backdrops: nil, posters: nil, logos: nil) }
+      func similar(for title: TMDBTitle) async throws -> [TMDBTitle] { [] }
+      func reviews(for title: TMDBTitle) async throws -> TMDBReviewsPage { TMDBReviewsPage(page: 1, results: [], totalPages: 0, totalResults: 0) }
+      func keywords(for title: TMDBTitle) async throws -> TMDBKeywords { TMDBKeywords(keywords: nil) }
+      func releaseDates(for title: TMDBTitle) async throws -> TMDBReleaseDates { TMDBReleaseDates(results: nil) }
+      func contentRatings(for title: TMDBTitle) async throws -> TMDBContentRatings { TMDBContentRatings(results: nil) }
+      func translations(for title: TMDBTitle) async throws -> TMDBTranslations { TMDBTranslations(translations: nil) }
+      func alternativeTitles(for title: TMDBTitle) async throws -> TMDBAlternativeTitles { TMDBAlternativeTitles(titles: nil) }
+      func movieCertifications() async throws -> [String: [TMDBReleaseDate]] { [:] }
+      func tvCertifications() async throws -> [String: [TMDBContentRating]] { [:] }
+      func collectionDetails(id: Int) async throws -> TMDBCollection { TMDBCollection(id: 1, name: "Test", overview: nil, posterPath: nil, backdropPath: nil, parts: nil) }
     }
