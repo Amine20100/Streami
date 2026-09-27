@@ -326,11 +326,23 @@ final class DiscoverViewModel {
             async let onTheAirRequest = session.client.onTheAirShows()
             async let airingTodayRequest = session.client.airingTodayShows()
             
-            (trending, trendingMovies, trendingShows, movies, topRatedMovies, nowPlayingMovies, upcomingMovies, shows, topRatedShows, onTheAirShows, airingTodayShows) = try await (
+            let loaded = try await (
                 trendingRequest, trendingMoviesRequest, trendingShowsRequest,
                 movieRequest, topRatedMoviesRequest, nowPlayingRequest, upcomingRequest,
                 showRequest, topRatedShowsRequest, onTheAirRequest, airingTodayRequest
             )
+            // /trending/all/week can include people; only movies & TV are playable.
+            trending = loaded.0.filter { $0.type == "movie" || $0.type == "tv" }
+            trendingMovies = loaded.1
+            trendingShows = loaded.2
+            movies = loaded.3
+            topRatedMovies = loaded.4
+            nowPlayingMovies = loaded.5
+            upcomingMovies = loaded.6
+            shows = loaded.7
+            topRatedShows = loaded.8
+            onTheAirShows = loaded.9
+            airingTodayShows = loaded.10
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -536,7 +548,31 @@ final class DetailViewModel: ObservableObject {
         details?.crew.filter { $0.job == "Creator" } ?? []
     }
 
+    var seasons: [TMDBSeason] {
+        (details?.seasons ?? [])
+            .filter { ($0.episodeCount ?? 0) > 0 }
+            .sorted { ($0.seasonNumber ?? 0) < ($1.seasonNumber ?? 0) }
+    }
+
+    func seasonEpisodes(season: Int) async -> [TMDBEpisode] {
+        guard title.type == "tv" else { return [] }
+        do {
+            return try await session.client.seasonDetails(showID: title.id, seasonNumber: season).episodes ?? []
+        } catch {
+            return []
+        }
+    }
+
     func loadSupportingData() async {
+        guard title.type == "movie" || title.type == "tv" else {
+            providerError = "Details are only available for movies and TV shows."
+            recommendationsError = "Details are only available for movies and TV shows."
+            detailsError = "Details are only available for movies and TV shows."
+            isLoadingProviders = false
+            isLoadingRecommendations = false
+            isLoadingDetails = false
+            return
+        }
         isLoadingProviders = true
         isLoadingRecommendations = true
         isLoadingDetails = true

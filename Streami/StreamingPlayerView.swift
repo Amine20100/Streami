@@ -10,6 +10,7 @@ struct StreamingPlayerView: View {
     let source: StreamingSource
     let season: Int?
     let episode: Int?
+    var onSourceFailed: (() -> Void)? = nil
     @State private var webView: WKWebView?
     @State private var isLoading = true
     @State private var error: String?
@@ -19,6 +20,7 @@ struct StreamingPlayerView: View {
     @State private var duration: TimeInterval = 0
     @State private var hasLoadedSavedProgress = false
     @State private var showNextEpisode = false
+    @State private var hasPlayback = false
     @Environment(\.dismiss) private var dismiss
     
     private var embedURL: URL? {
@@ -184,6 +186,13 @@ struct StreamingPlayerView: View {
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .task {
+            // Fail over if nothing actually plays within 30 seconds.
+            try? await Task.sleep(for: .seconds(30))
+            if !hasPlayback {
+                onSourceFailed?()
+            }
+        }
         .onDisappear {
             commitProgress()
         }
@@ -199,6 +208,7 @@ struct StreamingPlayerView: View {
                let duration = dict["duration"] as? TimeInterval {
                 self.currentTime = currentTime
                 self.duration = duration
+                self.hasPlayback = true
                 
                 // Debounced progress save
                 sourceManager.updateProgressDebounced(
@@ -229,6 +239,10 @@ struct StreamingPlayerView: View {
             if shouldResume {
                 seekToSavedPosition()
             }
+        case "play":
+            self.hasPlayback = true
+        case "loadError":
+            onSourceFailed?()
         default:
             break
         }
@@ -411,6 +425,7 @@ struct WebView: UIViewRepresentable {
         context.coordinator.error = $error
         context.coordinator.savedProgress = savedProgress
         context.coordinator.shouldResume = shouldResume
+        context.coordinator.loadedURL = url
         
         let request = URLRequest(url: url)
         webView.load(request)
@@ -418,7 +433,14 @@ struct WebView: UIViewRepresentable {
         return webView
     }
     
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        // Reload when the parent switches to a different source URL.
+        if context.coordinator.loadedURL != url {
+            context.coordinator.loadedURL = url
+            context.coordinator.hasInjectedScripts = false
+            webView.load(URLRequest(url: url))
+        }
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -434,6 +456,7 @@ struct WebView: UIViewRepresentable {
         var savedProgress: WatchProgress?
         var shouldResume: Bool
         var hasInjectedScripts = false
+        var loadedURL: URL?
         
         override init() {
             self.shouldResume = false
@@ -577,12 +600,14 @@ struct WebView: UIViewRepresentable {
             isLoading?.wrappedValue = false
             self.error?.wrappedValue = error.localizedDescription
             progressObservation?.invalidate()
+            onMessage?(["type": "loadError"])
         }
         
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             isLoading?.wrappedValue = false
             self.error?.wrappedValue = error.localizedDescription
             progressObservation?.invalidate()
+            onMessage?(["type": "loadError"])
         }
         
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

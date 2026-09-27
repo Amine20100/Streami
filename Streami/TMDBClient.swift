@@ -420,6 +420,7 @@ struct TMDBSeason: Decodable, Identifiable {
     let posterPath: String?
     let seasonNumber: Int?
     let voteAverage: Double?
+    let episodes: [TMDBEpisode]?
     
     var posterURL: URL? {
         guard let posterPath else { return nil }
@@ -427,7 +428,7 @@ struct TMDBSeason: Decodable, Identifiable {
     }
     
     enum CodingKeys: String, CodingKey {
-        case id, name, overview
+        case id, name, overview, episodes
         case airDate = "air_date"
         case episodeCount = "episode_count"
         case posterPath = "poster_path"

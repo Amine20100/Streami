@@ -7,14 +7,19 @@ struct DetailView: View {
     @Environment(\.openURL) private var openURL
     let title: TMDBTitle
     @StateObject private var model: DetailViewModel
-    @State private var showSourceSelection = false
     @State private var selectedSeason: Int? = nil
     @State private var selectedEpisode: Int? = nil
     @State private var showSeasonPicker = false
+    @State private var showEpisodePicker = false
+    @State private var seasonEpisodes: [TMDBEpisode] = []
+    @State private var isLoadingEpisodes = false
+    @State private var pendingSource: StreamingSource?
     @State private var showPlayer = false
     @State private var playerSource: StreamingSource?
     @State private var playerSeason: Int?
     @State private var playerEpisode: Int?
+    @State private var triedSourceIDs: Set<String> = []
+    @State private var showPlayerError = false
 
     init(title: TMDBTitle, services: AppServices) {
         self.title = title
@@ -31,6 +36,28 @@ struct DetailView: View {
         var enriched = title
         enriched.imdbID = imdbID
         return enriched
+    }
+
+    private func play(_ source: StreamingSource, season: Int?, episode: Int?) {
+        triedSourceIDs = [source.id]
+        playerSource = source
+        playerSeason = season
+        playerEpisode = episode
+        showPlayerError = false
+        showPlayer = true
+    }
+
+    private func advanceToNextSource() {
+        let type = title.type == "movie" ? "movie" : "tv"
+        let candidates = services.streamingSources.enabledSources(for: type)
+            .filter { !triedSourceIDs.contains($0.id) }
+        if let next = candidates.first {
+            triedSourceIDs.insert(next.id)
+            playerSource = next
+        } else {
+            showPlayer = false
+            showPlayerError = true
+        }
     }
 
     var body: some View {
@@ -189,27 +216,47 @@ struct DetailView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task(id: "\(title.type)-\(title.id)-\(model.regionCode)") { await model.loadSupportingData() }
-        .sheet(isPresented: $showSourceSelection) {
-            SourceSelectionSheet(
-                title: title,
-                season: selectedSeason,
-                episode: selectedEpisode,
-                streamingSources: services.streamingSources,
-                onPlay: { source, season, episode in
-                    playerSource = source
-                    playerSeason = season
-                    playerEpisode = episode
-                    showPlayer = true
+        .sheet(isPresented: $showSeasonPicker) {
+            SeasonPickerSheet(
+                seasons: model.seasons,
+                onSelect: { season in
+                    selectedSeason = season
+                    selectedEpisode = nil
+                    showSeasonPicker = false
+                    Task {
+                        isLoadingEpisodes = true
+                        seasonEpisodes = await model.seasonEpisodes(season: season)
+                        isLoadingEpisodes = false
+                        if seasonEpisodes.isEmpty {
+                            if let fallback = pendingSource ?? services.streamingSources.getBestSource(for: "tv") {
+                                play(fallback, season: season, episode: 1)
+                            }
+                        } else {
+                            showEpisodePicker = true
+                        }
+                    }
                 }
             )
         }
-        .sheet(isPresented: $showSeasonPicker) {
-            SeasonPickerSheet(
-                title: title,
-                selectedSeason: $selectedSeason,
-                selectedEpisode: $selectedEpisode,
-                onSelect: { showSourceSelection = true }
+        .sheet(isPresented: $showEpisodePicker) {
+            EpisodePickerSheet(
+                season: selectedSeason ?? 1,
+                episodes: seasonEpisodes,
+                isLoading: isLoadingEpisodes,
+                onSelect: { episode in
+                    selectedEpisode = episode
+                    showEpisodePicker = false
+                    if let source = pendingSource ?? services.streamingSources.getBestSource(for: title.type == "movie" ? "movie" : "tv") {
+                        play(source, season: selectedSeason, episode: episode)
+                    }
+                    pendingSource = nil
+                }
             )
+        }
+        .alert("Playback failed", isPresented: $showPlayerError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("None of the enabled sources could play this title. Try another source in Settings.")
         }
         .fullScreenCover(isPresented: $showPlayer) {
             if let source = playerSource {
@@ -217,7 +264,10 @@ struct DetailView: View {
                     title: titleWithIMDB,
                     source: source,
                     season: playerSeason,
-                    episode: playerEpisode
+                    episode: playerEpisode,
+                    onSourceFailed: {
+                        advanceToNextSource()
+                    }
                 )
             }
         }
@@ -287,13 +337,11 @@ struct DetailView: View {
                                 progress: services.streamingSources.getProgress(for: title),
                                 isBestAutoSource: services.streamingSources.autoSelectBestSource && bestSource?.id == source.id,
                                 onTap: {
-                                    if title.type == "tv" && selectedSeason == nil {
+                                    if title.type == "tv" && (selectedSeason == nil || selectedEpisode == nil) {
+                                        pendingSource = source
                                         showSeasonPicker = true
-                                    } else if services.streamingSources.getEmbedURL(for: source.id, title: titleWithIMDB, season: selectedSeason, episode: selectedEpisode) != nil {
-                                        playerSource = source
-                                        playerSeason = selectedSeason
-                                        playerEpisode = selectedEpisode
-                                        showPlayer = true
+                                    } else {
+                                        play(source, season: selectedSeason, episode: selectedEpisode)
                                     }
                                 }
                             )
@@ -500,8 +548,7 @@ struct ContinueWatchingCard: View {
     @State private var showPlayer = false
 
     private var titleWithIMDB: TMDBTitle {
-        guard let imdbID = services.streamingSources.sources.first?.id else { return title }
-        // The DetailViewModel has the imdbID
+        // TMDB numeric IDs work on every enabled source.
         return title
     }
 
@@ -795,40 +842,41 @@ private struct SourceRow: View {
 
 struct SeasonPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let title: TMDBTitle
-    @Binding var selectedSeason: Int?
-    @Binding var selectedEpisode: Int?
-    let onSelect: () -> Void
-    @State private var seasons: [Int] = []
-    @State private var episodes: [Int: Int] = [:] // season -> episode count
+    let seasons: [TMDBSeason]
+    let onSelect: (Int) -> Void
 
     var body: some View {
         NavigationStack {
             List {
-                if !seasons.isEmpty {
-                    Section("Select Season") {
-                        ForEach(seasons, id: \.self) { season in
-                            Button {
-                                selectedSeason = season
-                                let epCount = episodes[season] ?? 1
-                                if epCount == 1 {
-                                    selectedEpisode = 1
-                                    onSelect()
-                                } else {
-                                    // Show episode picker
-                                }
-                            } label: {
-                                HStack {
-                                    Text("Season \(season)")
+                Section("Select Season") {
+                    ForEach(seasons) { season in
+                        Button {
+                            if let number = season.seasonNumber {
+                                onSelect(number)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                KFImage(season.posterURL)
+                                    .placeholder {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(.white.opacity(0.12))
+                                            .overlay(Image(systemName: "tv").foregroundStyle(.secondary))
+                                    }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 44, height: 66)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(season.name ?? "Season \(season.seasonNumber ?? 0)")
                                         .font(.system(size: 16, weight: .medium))
                                         .foregroundStyle(.primary)
-                                    Spacer()
-                                    Text("\(episodes[season] ?? 0) episodes")
+                                    Text("\(season.episodeCount ?? 0) episodes")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(.secondary)
                                 }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -841,18 +889,8 @@ struct SeasonPickerSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .task {
-                await loadSeasons()
-            }
         }
-        .presentationDetents([.medium])
-    }
-
-    private func loadSeasons() async {
-        // Fetch season data from TMDB
-        // For now, use placeholder
-        seasons = Array(1...5)
-        episodes = [1: 10, 2: 10, 3: 10, 4: 10, 5: 10]
+        .presentationDetents([.medium, .large])
     }
 }
 
@@ -860,28 +898,56 @@ struct SeasonPickerSheet: View {
 
 struct EpisodePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let title: TMDBTitle
     let season: Int
-    @Binding var selectedEpisode: Int?
-    let onSelect: () -> Void
-    @State private var episodes: [Int] = []
+    let episodes: [TMDBEpisode]
+    let isLoading: Bool
+    let onSelect: (Int) -> Void
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Season \(season) - Select Episode") {
-                    ForEach(episodes, id: \.self) { episode in
-                        Button {
-                            selectedEpisode = episode
-                            onSelect()
-                        } label: {
-                            HStack {
-                                Text("Episode \(episode)")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.secondary)
+            Group {
+                if isLoading {
+                    ProgressView("Loading episodes...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if episodes.isEmpty {
+                    ContentUnavailableView("No episodes found", systemImage: "tv", description: Text("Episode data is unavailable for this season."))
+                } else {
+                    List {
+                        Section("Season \(season) - Select Episode") {
+                            ForEach(episodes) { episode in
+                                Button {
+                                    if let number = episode.episodeNumber {
+                                        onSelect(number)
+                                    }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        KFImage(episode.stillURL)
+                                            .placeholder {
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .fill(.white.opacity(0.12))
+                                                    .overlay(Image(systemName: "play.fill").foregroundStyle(.secondary))
+                                            }
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 88, height: 50)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("E\(episode.episodeNumber ?? 0) - \(episode.name ?? "Episode")")
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(2)
+                                            if let overview = episode.overview, !overview.isEmpty {
+                                                Text(overview)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(2)
+                                            }
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -894,16 +960,8 @@ struct EpisodePickerSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .task {
-                await loadEpisodes()
-            }
         }
-        .presentationDetents([.medium])
-    }
-
-    private func loadEpisodes() async {
-        // Fetch episode count from TMDB
-        episodes = Array(1...10)
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -203,11 +203,12 @@ final class StreamingSourceManager {
         guard let source = sources.first(where: { $0.id == sourceID }) else { return nil }
         let imdbID = title.imdbID
         
-        if title.type == "movie" || (title.type == "tv" && season == nil) {
+        if title.type == "movie" {
             return source.movieEmbedURL(tmdbID: title.id, imdbID: imdbID)
         } else if let season, let episode {
             return source.tvEmbedURL(tmdbID: title.id, imdbID: imdbID, season: season, episode: episode)
         } else {
+            // TV without a selected episode: never fall back to a movie URL.
             return source.tvSeriesEmbedURL(tmdbID: title.id, imdbID: imdbID)
         }
     }
