@@ -207,13 +207,12 @@ struct DetailView: View {
             )
         }
         .fullScreenCover(isPresented: $showPlayer) {
-            if let source = playerSource, let url = playerURL {
+            if let source = playerSource {
                 StreamingPlayerView(
                     title: titleWithIMDB,
                     source: source,
                     season: playerSeason,
-                    episode: playerEpisode,
-                    url: url
+                    episode: playerEpisode
                 )
             }
         }
@@ -460,8 +459,7 @@ struct ContinueWatchingCard: View {
                     title: title,
                     source: result.1,
                     season: progress.season,
-                    episode: progress.episode,
-                    url: result.0
+                    episode: progress.episode
                 )
             }
         }
@@ -837,6 +835,42 @@ private struct ProviderGroup: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Review Card
+
+struct ReviewCard: View {
+    let review: TMDBReview
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let author = review.authorDetails?.name ?? review.author {
+                    Text(author)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                if let rating = review.authorDetails?.rating {
+                    Text(String(format: "%.1f/10", rating))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.yellow)
+                }
+            }
+            
+            Text(review.content)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(4)
+            
+            Text(review.createdAt.prefix(10))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .padding(12)
+        .frame(width: 280)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

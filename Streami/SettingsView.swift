@@ -17,7 +17,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("TMDB Connection") {
-                    SecureField("TMDB v3 key or v4 Read Access Token", text: $tokenInput, axis: .vertical)
+                    SecureField("TMDB v3 key or v4 Read Access Token", text: $tokenInput)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Text("A default API key is pre-configured. You can use your own key from TMDB if preferred.")
