@@ -313,38 +313,56 @@ final class DiscoverViewModel {
         guard !session.credential.isEmpty else { return }
         isLoading = true
         errorMessage = nil
-        do {
-            async let trendingRequest = session.client.trending(mediaType: nil, timeWindow: "week")
-            async let trendingMoviesRequest = session.client.trending(mediaType: "movie", timeWindow: "week")
-            async let trendingShowsRequest = session.client.trending(mediaType: "tv", timeWindow: "week")
-            async let movieRequest = session.client.popularMovies()
-            async let topRatedMoviesRequest = session.client.topRatedMovies()
-            async let nowPlayingRequest = session.client.nowPlayingMovies(region: preferences.regionCode)
-            async let upcomingRequest = session.client.upcomingMovies(region: preferences.regionCode)
-            async let showRequest = session.client.popularShows()
-            async let topRatedShowsRequest = session.client.topRatedShows()
-            async let onTheAirRequest = session.client.onTheAirShows()
-            async let airingTodayRequest = session.client.airingTodayShows()
-            
-            let loaded = try await (
-                trendingRequest, trendingMoviesRequest, trendingShowsRequest,
-                movieRequest, topRatedMoviesRequest, nowPlayingRequest, upcomingRequest,
-                showRequest, topRatedShowsRequest, onTheAirRequest, airingTodayRequest
-            )
-            // /trending/all/week can include people; only movies & TV are playable.
-            trending = loaded.0.filter { $0.type == "movie" || $0.type == "tv" }
-            trendingMovies = loaded.1
-            trendingShows = loaded.2
-            movies = loaded.3
-            topRatedMovies = loaded.4
-            nowPlayingMovies = loaded.5
-            upcomingMovies = loaded.6
-            shows = loaded.7
-            topRatedShows = loaded.8
-            onTheAirShows = loaded.9
-            airingTodayShows = loaded.10
-        } catch {
-            errorMessage = error.localizedDescription
+        let client = session.client
+        let region = preferences.regionCode
+        // Load every shelf concurrently but keep failures isolated: one bad
+        // endpoint must not wipe out the shelves that did load.
+        let results = await withTaskGroup(of: (Int, Result<[TMDBTitle], Error>).self) { group in
+            group.addTask { do { return (0, .success(try await client.trending(mediaType: nil, timeWindow: "week"))) } catch { return (0, .failure(error)) } }
+            group.addTask { do { return (1, .success(try await client.trending(mediaType: "movie", timeWindow: "week"))) } catch { return (1, .failure(error)) } }
+            group.addTask { do { return (2, .success(try await client.trending(mediaType: "tv", timeWindow: "week"))) } catch { return (2, .failure(error)) } }
+            group.addTask { do { return (3, .success(try await client.popularMovies())) } catch { return (3, .failure(error)) } }
+            group.addTask { do { return (4, .success(try await client.topRatedMovies())) } catch { return (4, .failure(error)) } }
+            group.addTask { do { return (5, .success(try await client.nowPlayingMovies(region: region))) } catch { return (5, .failure(error)) } }
+            group.addTask { do { return (6, .success(try await client.upcomingMovies(region: region))) } catch { return (6, .failure(error)) } }
+            group.addTask { do { return (7, .success(try await client.popularShows())) } catch { return (7, .failure(error)) } }
+            group.addTask { do { return (8, .success(try await client.topRatedShows())) } catch { return (8, .failure(error)) } }
+            group.addTask { do { return (9, .success(try await client.onTheAirShows())) } catch { return (9, .failure(error)) } }
+            group.addTask { do { return (10, .success(try await client.airingTodayShows())) } catch { return (10, .failure(error)) } }
+            var collected = [Int: Result<[TMDBTitle], Error>]()
+            for await (index, result) in group {
+                collected[index] = result
+            }
+            return collected
+        }
+        var failures: [String] = []
+        func take(_ index: Int) -> [TMDBTitle] {
+            switch results[index] {
+            case .success(let titles):
+                return titles
+            case .failure(let error):
+                failures.append(error.localizedDescription)
+                return []
+            case .none:
+                failures.append("A TMDB request did not complete. Please try again.")
+                return []
+            }
+        }
+        // /trending/all/week can include people; only movies & TV are playable.
+        trending = take(0).filter { $0.type == "movie" || $0.type == "tv" }
+        trendingMovies = take(1)
+        trendingShows = take(2)
+        movies = take(3)
+        topRatedMovies = take(4)
+        nowPlayingMovies = take(5)
+        upcomingMovies = take(6)
+        shows = take(7)
+        topRatedShows = take(8)
+        onTheAirShows = take(9)
+        airingTodayShows = take(10)
+        let allEmpty = [trending, trendingMovies, trendingShows, movies, topRatedMovies, nowPlayingMovies, upcomingMovies, shows, topRatedShows, onTheAirShows, airingTodayShows].allSatisfy(\.isEmpty)
+        if allEmpty, let firstFailure = failures.first {
+            errorMessage = firstFailure
         }
         isLoading = false
         await loadFilterOptions(region: preferences.regionCode)

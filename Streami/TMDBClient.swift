@@ -693,15 +693,15 @@ struct TMDBWatchProvidersPage: Decodable {
 enum TMDBError: LocalizedError {
     case missingToken
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, String)
     case decodingError(Error)
     
     var errorDescription: String? {
         switch self {
         case .missingToken: "Add your TMDB API key or Read Access Token in Settings to get started."
         case .invalidResponse: "TMDB returned an unreadable response."
-        case .httpStatus(401): "That TMDB credential was not accepted. Check it in Settings."
-        case .httpStatus(let status): "TMDB request failed (\(status)). Please try again."
+        case .httpStatus(401, _): "That TMDB credential was not accepted. Check it in Settings."
+        case .httpStatus(let status, let endpoint): "TMDB request failed (\(status)) at \(endpoint). Please try again."
         case .decodingError(let error): "Failed to decode response: \(error.localizedDescription)"
         }
     }
@@ -1112,9 +1112,10 @@ struct TMDBClient: TMDBServicing {
         var request = URLRequest(url: url)
         TMDBAuthentication.configure(&request, credential: token)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let endpoint = url.path.isEmpty ? (url.host ?? "TMDB") : url.path
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw TMDBError.invalidResponse }
-        guard (200..<300).contains(response.statusCode) else { throw TMDBError.httpStatus(response.statusCode) }
+        guard (200..<300).contains(response.statusCode) else { throw TMDBError.httpStatus(response.statusCode, endpoint) }
         do {
             return try JSONDecoder().decode(Item.self, from: data)
         } catch {
