@@ -22,9 +22,6 @@ targets:
       - path: Streami
         excludes:
           - Resources/**
-          - DetailView.swift
-          - StreamingPlayerView.swift
-          - StreamingSources.swift
       - path: Streami/Resources
         buildPhase: resources
     dependencies:

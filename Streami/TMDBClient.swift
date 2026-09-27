@@ -647,7 +647,7 @@ struct TMDBList: Decodable, Identifiable {
 
 // MARK: - Page Models
 
-private struct TMDBPage<Item: Decodable>: Decodable {
+struct TMDBPage<Item: Decodable>: Decodable {
     let page: Int
     let results: [Item]
     let totalPages: Int
