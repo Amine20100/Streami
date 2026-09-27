@@ -474,33 +474,32 @@ final class SearchViewModel {
     }
 }
 
-@Observable
 @MainActor
-final class DetailViewModel {
+struct DetailViewModel {
     let title: TMDBTitle
-    private let session: TMDBSession
-    private let preferences: AppPreferences
-    private let watchlist: WatchlistStore
-    private(set) var providerRegion: TMDBProviderRegion?
-    private(set) var isLoadingProviders = true
-    private(set) var providerError: String?
-    private(set) var recommendations: [TMDBTitle] = []
-    private(set) var similar: [TMDBTitle] = []
-    private(set) var recommendationsError: String?
-    private(set) var isLoadingRecommendations = true
-    private(set) var details: TMDBTitleDetails?
-    private(set) var isLoadingDetails = true
-    private(set) var detailsError: String?
-    private(set) var isLoadingTrailer = false
-    private(set) var imdbID: String?
-    private(set) var videos: [TMDBVideo] = []
-    private(set) var images: TMDBImages?
-    private(set) var reviews: TMDBReviewsPage?
-    private(set) var keywords: TMDBKeywords?
-    private(set) var releaseDates: TMDBReleaseDates?
-    private(set) var contentRatings: TMDBContentRatings?
-    private(set) var translations: TMDBTranslations?
-    private(set) var alternativeTitles: TMDBAlternativeTitles?
+    let session: TMDBSession
+    let preferences: AppPreferences
+    let watchlist: WatchlistStore
+    var providerRegion: TMDBProviderRegion?
+    var isLoadingProviders = true
+    var providerError: String?
+    var recommendations: [TMDBTitle] = []
+    var similar: [TMDBTitle] = []
+    var recommendationsError: String?
+    var isLoadingRecommendations = true
+    var details: TMDBTitleDetails?
+    var isLoadingDetails = true
+    var detailsError: String?
+    var isLoadingTrailer = false
+    var imdbID: String?
+    var videos: [TMDBVideo] = []
+    var images: TMDBImages?
+    var reviews: TMDBReviewsPage?
+    var keywords: TMDBKeywords?
+    var releaseDates: TMDBReleaseDates?
+    var contentRatings: TMDBContentRatings?
+    var translations: TMDBTranslations?
+    var alternativeTitles: TMDBAlternativeTitles?
 
     init(title: TMDBTitle, session: TMDBSession, preferences: AppPreferences, watchlist: WatchlistStore) {
         self.title = title
@@ -534,7 +533,7 @@ final class DetailViewModel {
         details?.crew.filter { $0.job == "Creator" } ?? []
     }
 
-    func loadSupportingData() async {
+    mutating func loadSupportingData() async {
         isLoadingProviders = true
         isLoadingRecommendations = true
         isLoadingDetails = true
@@ -615,7 +614,7 @@ final class DetailViewModel {
         }
     }
 
-    func trailerURL() async -> URL? {
+    mutating func trailerURL() async -> URL? {
         isLoadingTrailer = true
         defer { isLoadingTrailer = false }
         return try? await session.client.trailerURL(for: title)

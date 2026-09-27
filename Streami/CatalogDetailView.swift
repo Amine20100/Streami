@@ -118,7 +118,7 @@ struct CatalogDetailView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task(id: "\(title.type)-\(title.id)-\(model.regionCode)") {
-            await model.wrappedValue.loadSupportingData()
+            await model.loadSupportingData()
         }
     }
 
@@ -172,7 +172,7 @@ struct CatalogDetailView: View {
             } else if let error = model.providerError {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(error).font(.footnote).foregroundStyle(.white.opacity(0.65))
-                    Button("Try again") { Task { await model.wrappedValue.loadSupportingData() } }
+                    Button("Try again") { Task { await model.loadSupportingData() } }
                         .font(.footnote.weight(.semibold))
                 }
             } else if let region = model.providerRegion {
@@ -224,7 +224,7 @@ struct CatalogDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.58))
                 Spacer()
-                Button("Retry") { Task { await model.wrappedValue.loadSupportingData() } }
+                Button("Retry") { Task { await model.loadSupportingData() } }
                     .font(.footnote.weight(.semibold))
             }
             .padding(.horizontal, 20)
@@ -254,7 +254,7 @@ struct CatalogDetailView: View {
         HStack(spacing: 12) {
             Button {
                 Task {
-                    if let url = await model.wrappedValue.trailerURL() { openURL(url) }
+                    if let url = await model.trailerURL() { openURL(url) }
                 }
             } label: {
                 Label("Watch trailer", systemImage: "play.fill")
@@ -264,7 +264,7 @@ struct CatalogDetailView: View {
             }
             .disabled(model.isLoadingTrailer)
 
-            Button { model.wrappedValue.toggleSaved() } label: {
+            Button { model.toggleSaved() } label: {
                 Image(systemName: model.isSaved ? "bookmark.fill" : "bookmark")
                     .frame(width: 52, height: 48)
                     .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
