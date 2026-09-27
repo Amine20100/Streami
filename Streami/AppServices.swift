@@ -174,6 +174,7 @@ final class WatchlistStore {
         self.persistence = persistence
         self.collectionPersistence = collectionPersistence
         titles = persistence.load()
+        collections = []  // Initialize first
         let defaultCollection = WatchlistCollection(
             id: Self.defaultCollectionID,
             name: "My List",
