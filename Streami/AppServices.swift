@@ -691,11 +691,12 @@ final class AppServices {
     let discover: DiscoverViewModel
     let search: SearchViewModel
     let settings: SettingsViewModel
+    let streamingSources: StreamingSourceManager
 
     init(
         credentialStore: any CredentialStoring = KeychainCredentialStore(),
         watchlistPersistence: any WatchlistPersisting = UserDefaultsWatchlistStore(),
-        watchlistCollectionPersistence: any WatchlistCollectionPersisting = UserDefaultsWatchlistCollectionPersistence(),
+        watchlistCollectionPersistence: any WatchlistCollectionPersisting = UserDefaultsWatchlistCollectionPersisting(),
         clientFactory: @escaping TMDBClientFactory = { TMDBClient(token: $0) },
         defaults: UserDefaults = .standard
     ) {
@@ -704,11 +705,13 @@ final class AppServices {
         let watchlist = WatchlistStore(persistence: watchlistPersistence, collectionPersistence: watchlistCollectionPersistence)
         let discover = DiscoverViewModel(session: session, preferences: preferences)
         let search = SearchViewModel(session: session)
+        let streamingSources = StreamingSourceManager.shared
         self.session = session
         self.preferences = preferences
         self.watchlist = watchlist
         self.discover = discover
         self.search = search
+        self.streamingSources = streamingSources
         settings = SettingsViewModel(session: session, preferences: preferences, discover: discover, search: search)
     }
 }
