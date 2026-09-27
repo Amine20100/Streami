@@ -435,7 +435,7 @@ struct WebView: UIViewRepresentable {
         var shouldResume: Bool
         var hasInjectedScripts = false
         
-        init() {
+        override init() {
             self.shouldResume = false
             super.init()
         }

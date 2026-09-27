@@ -974,4 +974,3 @@ private struct ProviderGroup: View {
             .padding(.horizontal, 20)
         }
     }
-}
