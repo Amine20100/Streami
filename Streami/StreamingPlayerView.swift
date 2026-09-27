@@ -570,7 +570,7 @@ struct WebView: UIViewRepresentable {
                     });
                 })();
             """
-            webView.evaluateJavaScript(script) { _, _ in }
+            webView?.evaluateJavaScript(script) { _, _ in }
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
