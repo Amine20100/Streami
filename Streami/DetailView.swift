@@ -155,7 +155,7 @@ struct DetailView: View {
                 HStack(spacing: 12) {
                     Button {
                         Task {
-                            if let trailerURL = await model.trailerURL() {
+                            if let trailerURL = await model.wrappedValue.trailerURL() {
                                 openURL(trailerURL)
                             }
                         }
@@ -167,7 +167,7 @@ struct DetailView: View {
                     }
                     .disabled(model.isLoadingTrailer)
 
-                    Button { model.toggleSaved() } label: {
+                    Button { model.wrappedValue.toggleSaved() } label: {
                         Image(systemName: model.isSaved ? "bookmark.fill" : "bookmark")
                             .frame(width: 52, height: 48)
                             .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
@@ -189,7 +189,7 @@ struct DetailView: View {
         .ignoresSafeArea(edges: .top)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .task(id: "\(title.type)-\(title.id)-\(model.regionCode)") { await model.loadSupportingData() }
+        .task(id: "\(title.type)-\(title.id)-\(model.regionCode)") { await model.wrappedValue.loadSupportingData() }
         .sheet(isPresented: $showSourceSelection) {
             SourceSelectionSheet(
                 title: title,
@@ -336,7 +336,7 @@ struct DetailView: View {
                     Text(providerError)
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.65))
-                    Button("Try again") { Task { await model.loadSupportingData() } }
+                    Button("Try again") { Task { await model.wrappedValue.loadSupportingData() } }
                         .font(.footnote.weight(.semibold))
                 }
             } else if let providerRegion = model.providerRegion {
