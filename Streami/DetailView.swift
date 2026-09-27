@@ -485,13 +485,6 @@ struct DetailView: View {
                         .padding(.horizontal, 20)
                 }
 
-                if let overview = details.overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(.body)
-                        .lineSpacing(5)
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(.horizontal, 20)
-                }
             }
             .padding(.horizontal, 20)
         }
