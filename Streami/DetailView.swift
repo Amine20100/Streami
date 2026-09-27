@@ -1,6 +1,5 @@
 import SwiftUI
 import Kingfisher
-import WebKit
 
 struct DetailView: View {
     @Environment(AppServices.self) private var services
@@ -14,12 +13,15 @@ struct DetailView: View {
     @State private var seasonEpisodes: [TMDBEpisode] = []
     @State private var isLoadingEpisodes = false
     @State private var pendingSource: StreamingSource?
+    @State private var selectedSourceID: String? = nil
     @State private var showPlayer = false
     @State private var playerSource: StreamingSource?
     @State private var playerSeason: Int?
     @State private var playerEpisode: Int?
     @State private var triedSourceIDs: Set<String> = []
     @State private var showPlayerError = false
+    @State private var showCastSheet = false
+    @State private var showRecsSheet = false
 
     init(title: TMDBTitle, services: AppServices) {
         self.title = title
@@ -38,6 +40,8 @@ struct DetailView: View {
         return enriched
     }
 
+    private var mediaType: String { title.type == "movie" ? "movie" : "tv" }
+
     private func play(_ source: StreamingSource, season: Int?, episode: Int?) {
         triedSourceIDs = [source.id]
         playerSource = source
@@ -47,9 +51,30 @@ struct DetailView: View {
         showPlayer = true
     }
 
+    private func effectiveSource() -> StreamingSource? {
+        if let id = selectedSourceID,
+           let chosen = services.streamingSources.sources.first(where: { $0.id == id }),
+           chosen.isEnabled {
+            return chosen
+        }
+        return services.streamingSources.getBestSource(for: mediaType)
+    }
+
+    private func playEffective() {
+        Haptics.tap()
+        guard let source = effectiveSource() else { return }
+        if title.type == "movie" {
+            play(source, season: nil, episode: nil)
+        } else if let season = selectedSeason, let episode = selectedEpisode {
+            play(source, season: season, episode: episode)
+        } else {
+            pendingSource = source
+            showSeasonPicker = true
+        }
+    }
+
     private func advanceToNextSource() {
-        let type = title.type == "movie" ? "movie" : "tv"
-        let candidates = services.streamingSources.enabledSources(for: type)
+        let candidates = services.streamingSources.enabledSources(for: mediaType)
             .filter { !triedSourceIDs.contains($0.id) }
         if let next = candidates.first {
             triedSourceIDs.insert(next.id)
@@ -60,160 +85,42 @@ struct DetailView: View {
         }
     }
 
+    private var hasProgress: Bool {
+        services.streamingSources.getProgress(for: title) != nil
+    }
+
+    private var enabledSources: [StreamingSource] {
+        services.streamingSources.enabledSources(for: mediaType)
+    }
+
+    private var activeSourceID: String? {
+        selectedSourceID ?? services.streamingSources.getBestSource(for: mediaType)?.id
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                // Backdrop with title overlay
-                ZStack(alignment: .bottomLeading) {
-                    KFImage(title.backdropURL)
-                        .placeholder {
-                        Rectangle().fill(Color(red: 0.09, green: 0.105, blue: 0.125))
-                    }
-                    .resizable()
-                    .scaledToFill()
-                    .frame(height: 280)
-                    .clipped()
-                    LinearGradient(colors: [.clear, Color(red: 0.035, green: 0.045, blue: 0.06)], startPoint: .center, endPoint: .bottom)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    Text(title.displayTitle)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 16)
-                }
-
-                // Metadata
-                HStack(spacing: 14) {
-                    if !title.year.isEmpty { Text(title.year) }
-                    Text(title.type == "tv" ? "Series" : "Movie")
-                    if let rating = title.voteAverage {
-                        Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
-                            .foregroundStyle(.yellow)
-                    }
-                }
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.horizontal, 20)
-
-                // Overview
-                if let overview = title.overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(.body)
-                        .lineSpacing(5)
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(.horizontal, 20)
-                }
-
-                // Continue Watching (if there's progress)
-                if let progress = services.streamingSources.getProgress(for: title) {
-                    ContinueWatchingCard(progress: progress, title: title, services: services)
-                }
-
-                // Streaming Sources Section
-                streamingSourcesSection
-
-                // Official Providers (TMDB/JustWatch)
-                providerSection
-
-                // TMDB Details
-                tmdbDetailsSection
-
-                // Recommendations
-                if !model.recommendations.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Recommended")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 13) {
-                                ForEach(model.recommendations, id: \.listID) { recommendation in
-                                    NavigationLink {
-                                        DetailView(title: recommendation, services: services)
-                                    } label: {
-                                        PosterTile(title: recommendation)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if !model.similar.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Similar")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 13) {
-                                ForEach(model.similar, id: \.listID) { similar in
-                                    NavigationLink {
-                                        DetailView(title: similar, services: services)
-                                    } label: {
-                                        PosterTile(title: similar)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if let reviews = model.reviews, !reviews.results.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Reviews")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 13) {
-                                ForEach(reviews.results.prefix(5)) { review in
-                                    ReviewCard(review: review)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                // Action Buttons
-                HStack(spacing: 12) {
-                    Button {
-                        Task {
-                            if let trailerURL = await model.trailerURL() {
-                                openURL(trailerURL)
-                            }
-                        }
-                    } label: {
-                        Label(model.isLoadingTrailer ? "Loading" : "Watch trailer", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color(red: 1, green: 0.34, blue: 0.19), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(model.isLoadingTrailer)
-
-                    Button { model.toggleSaved() } label: {
-                        Image(systemName: model.isSaved ? "bookmark.fill" : "bookmark")
-                            .frame(width: 52, height: 48)
-                            .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .accessibilityLabel(model.isSaved ? "Remove from My List" : "Add to My List")
-                }
-                .font(.system(size: 15, weight: .semibold))
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
-
+            VStack(alignment: .leading, spacing: 18) {
+                heroSection
+                metaRow
+                actionRow
+                serverPills
+                overviewSection
+                castSection
+                recsSection
+                reviewsSection
                 Text("Streami is a discovery guide. Streaming sources are third-party and may not be available in all regions.")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 20)
+                    .foregroundStyle(DS.muted)
+                    .padding(.horizontal, DS.gutter)
                     .padding(.bottom, 24)
             }
         }
-        .background(Color(red: 0.035, green: 0.045, blue: 0.06))
+        .background(DS.background)
         .ignoresSafeArea(edges: .top)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .navigationTitle(title.displayTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(DS.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task(id: "\(title.type)-\(title.id)-\(model.regionCode)") { await model.loadSupportingData() }
         .sheet(isPresented: $showSeasonPicker) {
@@ -246,12 +153,44 @@ struct DetailView: View {
                 onSelect: { episode in
                     selectedEpisode = episode
                     showEpisodePicker = false
-                    if let source = pendingSource ?? services.streamingSources.getBestSource(for: title.type == "movie" ? "movie" : "tv") {
+                    if let source = pendingSource ?? services.streamingSources.getBestSource(for: mediaType) {
                         play(source, season: selectedSeason, episode: episode)
                     }
                     pendingSource = nil
                 }
             )
+        }
+        .sheet(isPresented: $showCastSheet) {
+            NavigationStack {
+                ScrollView(showsIndicators: false) {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+                        ForEach(model.details?.cast ?? []) { member in
+                            CastCell(member: member)
+                        }
+                    }
+                    .padding(20)
+                }
+                .background(DS.background)
+                .navigationTitle("Cast")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(DS.background, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showRecsSheet) {
+            NavigationStack {
+                ScrollView(showsIndicators: false) {
+                    CatalogPosterGrid(titles: model.recommendations)
+                        .padding(.top, 12)
+                }
+                .background(DS.background)
+                .navigationTitle("More Like This")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(DS.background, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+            }
+            .presentationDetents([.medium, .large])
         }
         .alert("Playback failed", isPresented: $showPlayerError) {
             Button("OK", role: .cancel) { }
@@ -293,548 +232,267 @@ struct DetailView: View {
         }
     }
 
-    // MARK: - Streaming Sources Section
+    // MARK: - Sections
 
-    @ViewBuilder
-    private var streamingSourcesSection: some View {
-        let type = title.type == "movie" ? "movie" : "tv"
-        let sources = services.streamingSources.enabledSources(for: type)
-        let bestSource = services.streamingSources.getBestSource(for: type)
-
-        if !sources.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Stream Online")
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                    Spacer()
-                    HStack(spacing: 8) {
-                        if services.streamingSources.autoSelectBestSource, let best = bestSource {
-                            Label("Auto", systemImage: "wand.and.stars")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.orange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.orange.opacity(0.2), in: Capsule())
-                        }
-                        Text("\(sources.count) sources")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        // Show best source first if auto-select is enabled
-                        let orderedSources = services.streamingSources.autoSelectBestSource && bestSource != nil
-                            ? [bestSource!] + sources.filter { $0.id != bestSource!.id }
-                            : sources
-                        
-                        ForEach(orderedSources) { source in
-                            SourceButton(
-                                source: source,
-                                title: title,
-                                progress: services.streamingSources.getProgress(for: title),
-                                isBestAutoSource: services.streamingSources.autoSelectBestSource && bestSource?.id == source.id,
-                                onTap: {
-                                    if title.type == "tv" && (selectedSeason == nil || selectedEpisode == nil) {
-                                        pendingSource = source
-                                        showSeasonPicker = true
-                                    } else {
-                                        play(source, season: selectedSeason, episode: selectedEpisode)
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                }
+    private var heroSection: some View {
+        KFImage(title.backdropURL)
+            .placeholder {
+                LinearGradient(colors: [DS.card, DS.background], startPoint: .topLeading, endPoint: .bottomTrailing)
             }
-        }
+            .resizable()
+            .scaledToFill()
+            .frame(height: 400)
+            .clipped()
+            .overlay {
+                LinearGradient(colors: [.clear, DS.background.opacity(0.55), DS.background], startPoint: .center, endPoint: .bottom)
+            }
+            .accessibilityLabel("\(title.displayTitle) backdrop")
     }
 
-    // MARK: - Provider Section (Official)
-
-    @ViewBuilder
-    private var providerSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Where to watch")
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                Spacer()
-                Text(model.regionCode)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-
-            if model.isLoadingProviders {
-                ProgressView().tint(.white)
-            } else if let providerError = model.providerError {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(providerError)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.65))
-                    Button("Try again") { Task { await model.loadSupportingData() } }
-                        .font(.footnote.weight(.semibold))
+    private var metaRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.displayTitle)
+                .font(DS.display(26))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+            HStack(spacing: 10) {
+                if !title.year.isEmpty {
+                    Text(title.year)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(DS.foreground.opacity(0.9))
                 }
-            } else if let providerRegion = model.providerRegion {
-                ProviderGroup(title: "Subscription", providers: providerRegion.streaming ?? [])
-                ProviderGroup(title: "Free", providers: providerRegion.freeOptions ?? [])
-                ProviderGroup(title: "Free with ads", providers: providerRegion.ads ?? [])
-                ProviderGroup(title: "Rent", providers: providerRegion.rent ?? [])
-                ProviderGroup(title: "Buy", providers: providerRegion.buy ?? [])
-
-                if let link = providerRegion.link {
-                    Link(destination: link) {
-                        Label("See all options", systemImage: "arrow.up.right")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                }
-
-                if (providerRegion.streaming ?? []).isEmpty && (providerRegion.freeOptions ?? []).isEmpty &&
-                    (providerRegion.ads ?? []).isEmpty && (providerRegion.rent ?? []).isEmpty &&
-                    (providerRegion.buy ?? []).isEmpty {
-                    Text("No listings are available for this title in \(model.regionCode).")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                Text("Availability data by JustWatch. Listings can change.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.45))
-            } else {
-                Text("No listings are available for this title in \(model.regionCode).")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-        }
-        .padding(16)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 20)
-    }
-
-    @ViewBuilder
-    private var tmdbDetailsSection: some View {
-        if let details = model.details {
-            VStack(alignment: .leading, spacing: 16) {
-                if let genres = details.genres, !genres.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Genres")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(genres) { genre in
-                                    Text(genre.name)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.82))
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 7)
-                                        .background(.white.opacity(0.09), in: Capsule())
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
                 if let runtime = model.displayRuntime {
-                    Label(runtime, systemImage: "clock")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.horizontal, 20)
+                    Text(runtime)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(DS.foreground.opacity(0.9))
                 }
-
                 if let certification = model.certification {
-                    Label(certification, systemImage: "checkmark.shield")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 20)
+                    Text(certification)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.foreground)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.white.opacity(0.55), lineWidth: 1)
+                        )
                 }
-
-                if !model.directors.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(model.directors.count == 1 ? "Director" : "Directors")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(model.directors) { director in
-                                    VStack(spacing: 4) {
-                                        if let url = director.profileURL {
-                                            KFImage(url)
-                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(Circle())
-                                        } else {
-                                            Circle()
-                                                .fill(.white.opacity(0.1))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
-                                        }
-                                        Text(director.name)
-                                            .font(.caption.weight(.medium))
-                                            .lineLimit(2)
-                                            .frame(width: 70)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if !model.creators.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Creators")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(model.creators) { creator in
-                                    VStack(spacing: 4) {
-                                        if let url = creator.profileURL {
-                                            KFImage(url)
-                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(Circle())
-                                        } else {
-                                            Circle()
-                                                .fill(.white.opacity(0.1))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
-                                        }
-                                        Text(creator.name)
-                                            .font(.caption.weight(.medium))
-                                            .lineLimit(2)
-                                            .frame(width: 70)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if let status = details.status {
-                    Text(status.capitalized)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.horizontal, 20)
-                }
-
-                if let tagline = details.tagline, !tagline.isEmpty {
-                    Text(tagline)
-                        .font(.subheadline.italic())
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 20)
-                }
-
+                Text("HD")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(DS.foreground)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
             }
-            .padding(.horizontal, 20)
         }
-    }
-}
-
-// MARK: - Continue Watching Card
-
-struct ContinueWatchingCard: View {
-    let progress: WatchProgress
-    let title: TMDBTitle
-    let services: AppServices
-    @State private var showPlayer = false
-
-    private var titleWithIMDB: TMDBTitle {
-        // TMDB numeric IDs work on every enabled source.
-        return title
+        .padding(.horizontal, DS.gutter)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Continue Watching")
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                Spacer()
-                if let source = services.streamingSources.sources.first(where: { $0.id == progress.sourceID }) {
-                    Text(source.name)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.orange)
-                }
+    private var actionRow: some View {
+        HStack(spacing: 12) {
+            Button(action: playEffective) {
+                Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(DS.accent, in: Capsule())
             }
-            .padding(.horizontal, 20)
+            .buttonStyle(PressableStyle())
+            .accessibilityHint("Starts playback with the selected source")
 
             Button {
-                showPlayer = true
+                Haptics.tap()
+                model.toggleSaved()
             } label: {
-                HStack(spacing: 16) {
-                    KFImage(title.posterURL)
-                        .placeholder { Rectangle().fill(Color(red: 0.09, green: 0.105, blue: 0.125)) }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 100, height: 150)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(alignment: .center) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.white)
-                                .shadow(radius: 4)
-                        }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(title.displayTitle)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-
-                        if let season = progress.season, let episode = progress.episode {
-                            Text("Season \(season), Episode \(episode)")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-
-                        // Progress bar
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("\(Int(progress.progress * 100))% watched")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
-                                Spacer()
-                                Text(formatTime(progress.currentTime))
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            ProgressView(value: progress.progress)
-                                .tint(.orange)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 20)
-        }
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let result = services.streamingSources.getBestSourceURL(for: title, season: progress.season, episode: progress.episode) {
-                StreamingPlayerView(
-                    title: title,
-                    source: result.1,
-                    season: progress.season,
-                    episode: progress.episode
-                )
-            }
-        }
-    }
-
-    private func formatTime(_ time: TimeInterval) -> String {
-        let hours = Int(time) / 3600
-        let minutes = Int(time) % 3600 / 60
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(minutes)m"
-    }
-}
-
-// MARK: - Source Button
-
-struct SourceButton: View {
-    let source: StreamingSource
-    let title: TMDBTitle
-    let progress: WatchProgress?
-    let isBestAutoSource: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(.white.opacity(0.1))
-                        .frame(width: 56, height: 56)
-
-                    Image(systemName: source.icon)
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(.orange)
-                    
-                    if isBestAutoSource {
-                        Circle()
-                            .stroke(.orange, lineWidth: 2)
-                            .frame(width: 56, height: 56)
-                    }
-                }
-
-                Text(source.name)
-                    .font(.system(size: 11, weight: .semibold))
+                Label(model.isSaved ? "Saved" : "My List", systemImage: model.isSaved ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .frame(width: 70)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .overlay(
+                        Capsule()
+                            .stroke(.white.opacity(0.35), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(model.isSaved ? "Remove from My List" : "Add to My List")
+        }
+        .padding(.horizontal, DS.gutter)
+    }
 
-                if isBestAutoSource {
-                    Text("AUTO")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(.orange.opacity(0.2), in: Capsule())
-                }
-
-                if let progress {
-                    ProgressView(value: progress.progress)
-                        .frame(width: 70)
-                        .tint(.orange)
-                        .scaleEffect(y: 0.5)
+    private var serverPills: some View {
+        Group {
+            if !enabledSources.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(enabledSources.enumerated()), id: \.element.id) { index, source in
+                            let isActive = activeSourceID == source.id
+                            Button {
+                                Haptics.select()
+                                selectedSourceID = source.id
+                                if title.type == "tv" && (selectedSeason == nil || selectedEpisode == nil) {
+                                    pendingSource = source
+                                    showSeasonPicker = true
+                                }
+                            } label: {
+                                Text("Server \(index + 1) - \(source.name)")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        isActive ? DS.accent : Color.clear,
+                                        in: Capsule()
+                                    )
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(isActive ? Color.clear : .white.opacity(0.3), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(PressableStyle())
+                            .accessibilityLabel("Use \(source.name)")
+                        }
+                    }
+                    .padding(.horizontal, DS.gutter)
                 }
             }
         }
-        .buttonStyle(.plain)
+    }
+
+    private var overviewSection: some View {
+        Group {
+            if let overview = title.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.system(size: 15))
+                    .lineSpacing(4)
+                    .foregroundStyle(DS.foreground.opacity(0.88))
+                    .padding(.horizontal, DS.gutter)
+            }
+        }
+    }
+
+    private var castSection: some View {
+        Group {
+            if let cast = model.details?.cast, !cast.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("Cast")
+                            .font(DS.headline(21))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Button {
+                            Haptics.tap()
+                            showCastSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("See All")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(DS.muted)
+                        }
+                        .buttonStyle(PressableStyle())
+                    }
+                    .padding(.horizontal, DS.gutter)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 16) {
+                            ForEach(cast) { member in
+                                CastCell(member: member)
+                            }
+                        }
+                        .padding(.horizontal, DS.gutter)
+                    }
+                }
+            }
+        }
+    }
+
+    private var recsSection: some View {
+        Group {
+            if !model.recommendations.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("More Like This")
+                            .font(DS.headline(21))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Button {
+                            Haptics.tap()
+                            showRecsSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("See All")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(DS.muted)
+                        }
+                        .buttonStyle(PressableStyle())
+                    }
+                    .padding(.horizontal, DS.gutter)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 13) {
+                            ForEach(model.recommendations, id: \.listID) { recommendation in
+                                NavigationLink(value: recommendation) {
+                                    PosterTile(title: recommendation)
+                                }
+                                .buttonStyle(PressableStyle())
+                            }
+                        }
+                        .padding(.horizontal, DS.gutter)
+                    }
+                }
+            }
+        }
+    }
+
+    private var reviewsSection: some View {
+        Group {
+            if let reviews = model.reviews, !reviews.results.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    SectionHeader(title: "Reviews")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 13) {
+                            ForEach(reviews.results.prefix(5)) { review in
+                                ReviewCard(review: review)
+                            }
+                        }
+                        .padding(.horizontal, DS.gutter)
+                    }
+                }
+            }
+        }
     }
 }
 
-// MARK: - Source Selection Sheet
+// MARK: - Cast cell
 
-struct SourceSelectionSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let title: TMDBTitle
-    let season: Int?
-    let episode: Int?
-    let streamingSources: StreamingSourceManager
-    let onPlay: (StreamingSource, Int?, Int?) -> Void
-    @State private var selectedSource: StreamingSource?
-    @State private var useAutoSelect: Bool = true
-
-    private var titleWithIMDB: TMDBTitle {
-        // The IMDB ID is fetched in DetailViewModel
-        return title
-    }
-
-    private var availableSources: [StreamingSource] {
-        if title.type == "movie" {
-            return streamingSources.enabledSources(for: "movie")
-        } else {
-            return streamingSources.enabledSources(for: "tv")
-        }
-    }
+private struct CastCell: View {
+    let member: TMDBCastMember
 
     var body: some View {
-        NavigationStack {
-            List {
-                // Auto-select option
-                Section {
-                    Toggle(isOn: $useAutoSelect) {
-                        HStack {
-                            Image(systemName: "wand.and.stars")
-                                .font(.title2)
-                                .foregroundStyle(.orange)
-                                .frame(width: 40)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Auto-select best server")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                Text("Automatically picks the fastest, most reliable source")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
+        VStack(spacing: 8) {
+            KFImage(member.profileURL)
+                .placeholder {
+                    Circle()
+                        .fill(DS.card)
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(DS.muted))
                 }
-
-                // Continue watching section
-                if let progress = streamingSources.getProgress(for: title, season: season, episode: episode),
-                   let source = streamingSources.sources.first(where: { $0.id == progress.sourceID }) {
-                    Section("Continue Watching") {
-                        SourceRow(
-                            source: source,
-                            progress: progress,
-                            isSelected: selectedSource?.id == source.id
-                        ) {
-                            selectedSource = source
-                            useAutoSelect = false
-                        }
-                    }
-                }
-
-                Section("Available Sources") {
-                    ForEach(availableSources) { source in
-                        SourceRow(
-                            source: source,
-                            progress: streamingSources.getProgress(for: title, season: season, episode: episode),
-                            isSelected: selectedSource?.id == source.id
-                        ) {
-                            selectedSource = source
-                            useAutoSelect = false
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Choose Source")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Play") {
-                        if useAutoSelect {
-                            if let result = streamingSources.getBestSourceURL(for: title, season: season, episode: episode) {
-                                dismiss()
-                                onPlay(result.1, season, episode)
-                            }
-                        } else if let source = selectedSource {
-                            dismiss()
-                            onPlay(source, season, episode)
-                        }
-                    }
-                    .disabled(!useAutoSelect && selectedSource == nil)
-                }
-            }
+                .resizable()
+                .scaledToFill()
+                .frame(width: 84, height: 84)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(DS.accent, lineWidth: 2))
+            Text(member.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.foreground)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 84)
         }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-private struct SourceRow: View {
-    let source: StreamingSource
-    let progress: WatchProgress?
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: source.icon)
-                    .font(.title2)
-                    .foregroundStyle(.orange)
-                    .frame(width: 40)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(source.name)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
-
-                    if let progress {
-                        HStack(spacing: 8) {
-                            ProgressView(value: progress.progress)
-                                .frame(width: 100)
-                            Text("\(Int(progress.progress * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.orange)
-                }
-            }
-            .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(member.name), \(member.creditDescription)")
     }
 }
 
@@ -965,6 +623,41 @@ struct EpisodePickerSheet: View {
     }
 }
 
+// MARK: - Review Card
+
+struct ReviewCard: View {
+    let review: TMDBReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                let author = review.authorDetails?.name ?? review.author
+                Text(author)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DS.foreground)
+                Spacer()
+                if let rating = review.authorDetails?.rating {
+                    Text(String(format: "%.1f/10", rating))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(DS.gold)
+                }
+            }
+
+            Text(review.content)
+                .font(.caption)
+                .foregroundStyle(DS.foreground.opacity(0.7))
+                .lineLimit(4)
+
+            Text(review.createdAt.prefix(10))
+                .font(.caption2)
+                .foregroundStyle(DS.muted)
+        }
+        .padding(14)
+        .frame(width: 280)
+        .background(DS.card, in: RoundedRectangle(cornerRadius: DS.radiusMedium))
+    }
+}
+
 // MARK: - Provider Group
 
 private struct ProviderGroup: View {
@@ -976,7 +669,7 @@ private struct ProviderGroup: View {
             VStack(alignment: .leading, spacing: 9) {
                 Text(title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(DS.muted)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(providers) { provider in
@@ -996,46 +689,11 @@ private struct ProviderGroup: View {
                                     .lineLimit(1)
                             }
                             .padding(7)
-                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: DS.radiusSmall))
                         }
                     }
                 }
             }
         }
-    }
-}
-
-// MARK: - Review Card
-
-struct ReviewCard: View {
-    let review: TMDBReview
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                let author = review.authorDetails?.name ?? review.author
-                Text(author)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                Spacer()
-                if let rating = review.authorDetails?.rating {
-                    Text(String(format: "%.1f/10", rating))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.yellow)
-                }
-            }
-            
-            Text(review.content)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-                .lineLimit(4)
-            
-            Text(review.createdAt.prefix(10))
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
-        }
-        .padding(12)
-        .frame(width: 280)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
 }

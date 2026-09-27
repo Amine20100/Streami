@@ -1,13 +1,7 @@
 import SwiftUI
 import Kingfisher
 import Lottie
-
-private enum StreamiStyle {
-    static let background = Color(red: 0.035, green: 0.045, blue: 0.06)
-    static let surface = Color(red: 0.09, green: 0.105, blue: 0.125)
-    static let accent = Color(red: 1.0, green: 0.34, blue: 0.19)
-    static let muted = Color(red: 0.62, green: 0.65, blue: 0.7)
-}
+import Charts
 
 private enum DiscoverMode: String, CaseIterable, Identifiable {
     case forYou = "For You"
@@ -61,8 +55,9 @@ struct ContentView: View {
                 WatchlistView(showingSettings: $showingSettings)
             }
             .tabItem { Label("My List", systemImage: "bookmark") }
+            .badge(services.watchlist.titles.count)
         }
-        .tint(StreamiStyle.accent)
+        .tint(DS.accent)
         .task { await services.discover.load() }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
@@ -79,14 +74,15 @@ private struct HomeView: View {
     @State private var selectedGenreID: Int?
     @State private var selectedYear: Int?
     @State private var selectedProviderID: Int?
-    @State private var trendingTimeWindow = "week"
 
-    private var featuredTitle: TMDBTitle? {
+    private var heroTitles: [TMDBTitle] {
+        let pool: [TMDBTitle]
         switch mode {
-        case .forYou: services.discover.trending.first
-        case .movies: services.discover.movies.first ?? services.discover.trendingMovies.first
-        case .series: services.discover.shows.first ?? services.discover.trendingShows.first
+        case .forYou: pool = services.discover.trending
+        case .movies: pool = services.discover.movies + services.discover.trendingMovies
+        case .series: pool = services.discover.shows + services.discover.trendingShows
         }
+        return Array(pool.prefix(5))
     }
 
     private var catalogType: String { mode == .series ? "tv" : "movie" }
@@ -102,20 +98,14 @@ private struct HomeView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 26) {
                 if services.session.credential.isEmpty {
                     WelcomeView { showingSettings = true }
                 } else {
-                    if let featured = featuredTitle {
-                        HeroView(title: featured)
+                    if !heroTitles.isEmpty {
+                        HeroCarousel(titles: heroTitles)
                     } else if services.discover.isLoading {
-                        VStack(spacing: 8) {
-                            StreamiAnimation(size: 88)
-                            Text("Finding your next favorite")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(StreamiStyle.muted)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 380)
+                        HeroSkeleton()
                     }
 
                     if let error = services.discover.errorMessage {
@@ -130,23 +120,22 @@ private struct HomeView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, DS.gutter)
+                    .sensoryFeedback(.selection, trigger: mode)
 
                     switch mode {
                     case .forYou:
-                        MediaShelf(title: "Trending this week", items: services.discover.trending, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Trending now", subtitle: "What everyone is watching", items: services.discover.trending, isLoading: services.discover.isLoading, ranked: true)
                         MediaShelf(title: "Trending movies", items: services.discover.trendingMovies, isLoading: services.discover.isLoading)
                         MediaShelf(title: "Trending series", items: services.discover.trendingShows, isLoading: services.discover.isLoading)
                         MediaShelf(title: "Top rated movies", items: services.discover.topRatedMovies, isLoading: services.discover.isLoading)
                         MediaShelf(title: "Now playing", items: services.discover.nowPlayingMovies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Upcoming movies", items: services.discover.upcomingMovies, isLoading: services.discover.isLoading)
+                        MediaShelf(title: "Coming soon", items: services.discover.upcomingMovies, isLoading: services.discover.isLoading)
                         MediaShelf(title: "Popular series", items: services.discover.shows, isLoading: services.discover.isLoading)
                         MediaShelf(title: "Top rated series", items: services.discover.topRatedShows, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "On the air", items: services.discover.onTheAirShows, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Airing today", items: services.discover.airingTodayShows, isLoading: services.discover.isLoading)
                         let pickedForYou = services.discover.personalizedTitles(from: services.watchlist.titles)
                         if !pickedForYou.isEmpty {
-                            MediaShelf(title: "Picked for you", items: pickedForYou, isLoading: false)
+                            MediaShelf(title: "Picked for you", subtitle: "Based on your list", items: pickedForYou, isLoading: false)
                         }
                     case .movies:
                         catalogGrid(title: "Movies")
@@ -161,22 +150,36 @@ private struct HomeView: View {
             }
             .padding(.bottom, 30)
         }
-        .background(StreamiStyle.background)
+        .background(DS.background)
+        .refreshable { await services.discover.load() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 7) {
-                    Image(systemName: "play.rectangle.fill").foregroundStyle(StreamiStyle.accent)
-                    Text("streami").font(.system(size: 21, weight: .bold, design: .rounded))
+                HStack(spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(DS.accent)
+                            .frame(width: 26, height: 26)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("streami")
+                        .font(DS.display(21))
+                        .foregroundStyle(DS.foreground)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showingSettings = true } label: {
                     Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DS.foreground)
+                        .frame(width: 38, height: 38)
+                        .background(.white.opacity(0.08), in: Circle())
                 }
                 .accessibilityLabel("Settings")
             }
         }
-        .toolbarBackground(StreamiStyle.background, for: .navigationBar)
+        .toolbarBackground(DS.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationDestination(for: TMDBTitle.self) { DetailView(title: $0, services: services) }
         .task(id: catalogRequestKey) {
@@ -190,7 +193,8 @@ private struct HomeView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(.system(size: 23, weight: .bold, design: .rounded))
+                    .font(DS.display(23))
+                    .foregroundStyle(DS.foreground)
                 Spacer()
                 Menu {
                     Picker("Sort by", selection: $sort) {
@@ -201,10 +205,10 @@ private struct HomeView: View {
                 } label: {
                     Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(StreamiStyle.muted)
+                        .foregroundStyle(DS.muted)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, DS.gutter)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -229,16 +233,16 @@ private struct HomeView: View {
                     Menu {
                         Button("Any provider") { selectedProviderID = nil }
                         ForEach(availableProviders) { provider in
-                            Button(provider.providerName) { selectedProviderID = provider.providerID }
+                            Button(provider.providerName) { selectedProviderID = provider.id }
                         }
                     } label: {
                         FilterPill(
-                            title: availableProviders.first(where: { $0.providerID == selectedProviderID })?.providerName ?? "Provider",
+                            title: availableProviders.first(where: { $0.id == selectedProviderID })?.providerName ?? "Provider",
                             symbol: "tv"
                         )
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, DS.gutter)
             }
 
             if services.discover.isLoadingFilterOptions && availableGenres.isEmpty {
@@ -246,14 +250,14 @@ private struct HomeView: View {
                     ProgressView().tint(.white)
                     Text("Loading filters")
                         .font(.caption)
-                        .foregroundStyle(StreamiStyle.muted)
+                        .foregroundStyle(DS.muted)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, DS.gutter)
             } else if let error = services.discover.filterError {
                 HStack {
                     Text("Filters unavailable: \(error)")
                         .font(.caption)
-                        .foregroundStyle(StreamiStyle.muted)
+                        .foregroundStyle(DS.muted)
                         .lineLimit(2)
                     Spacer()
                     Button("Retry") {
@@ -261,7 +265,7 @@ private struct HomeView: View {
                     }
                     .font(.caption.weight(.semibold))
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, DS.gutter)
             }
 
             if services.discover.isLoadingCatalog && catalogTitles.isEmpty {
@@ -293,33 +297,40 @@ private struct WelcomeView: View {
         VStack(alignment: .leading, spacing: 18) {
             StreamiAnimation(size: 86)
             Text("Find your\nnext favorite.")
-                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .font(DS.display(38))
+                .foregroundStyle(DS.foreground)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Explore movies and series from across the world of film.")
+            Text("Movies and series from across the world of film — trailers, ratings, and where to watch.")
                 .font(.subheadline)
-                .foregroundStyle(StreamiStyle.muted)
-            Button(action: openSettings) {
+                .foregroundStyle(DS.muted)
+            Button(action: {
+                Haptics.tap()
+                openSettings()
+            }) {
                 Label("Connect TMDB", systemImage: "arrow.right")
                     .font(.system(size: 15, weight: .semibold))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 13)
-                    .background(StreamiStyle.accent, in: Capsule())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(DS.accent, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(26)
-        .frame(minHeight: 380, alignment: .bottomLeading)
+        .frame(minHeight: 400, alignment: .bottomLeading)
         .background {
             ZStack(alignment: .topTrailing) {
-                LinearGradient(colors: [StreamiStyle.surface, StreamiStyle.background], startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: [DS.secondary.opacity(0.55), DS.background], startPoint: .topLeading, endPoint: .bottomTrailing)
                 Image(systemName: "sparkles.tv")
                     .font(.system(size: 150, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(0.045))
+                    .foregroundStyle(DS.accent.opacity(0.16))
                     .offset(x: 25, y: 28)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: DS.radiusLarge))
+        .padding(.horizontal, DS.gutter)
     }
 }
 
@@ -334,99 +345,177 @@ private struct StreamiAnimation: View {
     }
 }
 
-private struct HeroView: View {
+// MARK: - Paging hero carousel
+
+private struct HeroCarousel: View {
+    let titles: [TMDBTitle]
+    @State private var selection = 0
+
+    var body: some View {
+        VStack(spacing: 10) {
+            TabView(selection: $selection) {
+                ForEach(Array(titles.enumerated()), id: \.element.listID) { index, title in
+                    HeroCard(title: title, rank: index + 1)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 480)
+            .clipShape(RoundedRectangle(cornerRadius: DS.radiusLarge))
+            .padding(.horizontal, DS.gutter)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(6))
+                    guard titles.count > 1, !UIAccessibility.isReduceMotionEnabled else { continue }
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        selection = (selection + 1) % titles.count
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                ForEach(titles.indices, id: \.self) { index in
+                    Capsule()
+                        .fill(index == selection ? DS.accent : .white.opacity(0.22))
+                        .frame(width: index == selection ? 22 : 6, height: 6)
+                        .animation(.easeInOut(duration: 0.25), value: selection)
+                }
+            }
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct HeroCard: View {
+    @Environment(AppServices.self) private var services
     let title: TMDBTitle
+    let rank: Int
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             KFImage(title.backdropURL)
                 .placeholder {
-                LinearGradient(colors: [StreamiStyle.surface, StreamiStyle.background], startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-            .resizable()
-            .scaledToFill()
-            .frame(height: 470)
-            .clipped()
+                    LinearGradient(colors: [DS.card, DS.background], startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+                .resizable()
+                .scaledToFill()
+                .frame(height: 480)
+                .clipped()
 
-            LinearGradient(colors: [.clear, StreamiStyle.background.opacity(0.45), StreamiStyle.background], startPoint: .center, endPoint: .bottom)
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.35), .black.opacity(0.92)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
 
-            VStack(alignment: .leading, spacing: 11) {
-                Text("YOUR NEXT OBSESSION")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.5)
-                    .foregroundStyle(StreamiStyle.accent)
-                Text(title.displayTitle)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .lineLimit(2)
-                HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("TRENDING #\(rank)")
+                        .font(DS.eyebrow)
+                        .tracking(1.5)
+                        .foregroundStyle(DS.accent)
                     if let rating = title.voteAverage {
-                        Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
-                            .foregroundStyle(.yellow)
+                        RatingBadge(rating: rating)
                     }
-                    if !title.year.isEmpty { Text(title.year) }
-                    Text(title.type == "tv" ? "Series" : "Movie")
                 }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(StreamiStyle.muted)
-                NavigationLink(value: title) {
-                    Label("Explore title", systemImage: "arrow.up.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .padding(.horizontal, 17)
-                        .padding(.vertical, 11)
-                        .background(.white, in: Capsule())
-                        .foregroundStyle(.black)
+                Text(title.displayTitle)
+                    .font(DS.display(32))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    if !title.year.isEmpty { MetaPill(text: title.year) }
+                    MetaPill(text: title.type == "tv" ? "Series" : "Movie", systemImage: title.type == "tv" ? "tv" : "film")
                 }
-                .buttonStyle(.plain)
+                HStack(spacing: 10) {
+                    NavigationLink(value: title) {
+                        Label("Watch now", systemImage: "play.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(DS.accent, in: Capsule())
+                    }
+                    .buttonStyle(PressableStyle())
+                    Button {
+                        Haptics.tap()
+                        services.watchlist.toggle(title)
+                    } label: {
+                        Image(systemName: services.watchlist.contains(title) ? "checkmark" : "plus")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.16), in: Circle())
+                    }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel(services.watchlist.contains(title) ? "In My List" : "Add to My List")
+                }
                 .padding(.top, 4)
             }
             .padding(.horizontal, 22)
-            .padding(.bottom, 24)
+            .padding(.bottom, 26)
         }
-        .frame(height: 470)
+        .frame(height: 480)
         .clipped()
     }
 }
 
+private struct HeroSkeleton: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: DS.radiusLarge)
+            .fill(DS.card)
+            .frame(height: 480)
+            .padding(.horizontal, DS.gutter)
+            .shimmer()
+            .accessibilityLabel("Loading featured titles")
+    }
+}
+
+// MARK: - Shelves
+
 private struct MediaShelf: View {
     let title: String
+    var subtitle: String?
     let items: [TMDBTitle]
     let isLoading: Bool
+    var ranked: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text(title).font(.system(size: 19, weight: .bold, design: .rounded))
-            }
-            .padding(.horizontal, 20)
+            SectionHeader(title: title, subtitle: subtitle)
 
             if items.isEmpty && isLoading {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 13) {
                         ForEach(0..<5, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(StreamiStyle.surface)
-                                .frame(width: 132, height: 194)
+                            RoundedRectangle(cornerRadius: DS.radiusSmall)
+                                .fill(DS.card)
+                                .frame(width: DS.posterW, height: DS.posterH)
+                                .shimmer()
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .redacted(reason: .placeholder)
+                    .padding(.horizontal, DS.gutter)
                 }
+                .accessibilityLabel("Loading \(title)")
             } else if items.isEmpty {
                 Text("No titles found.")
                     .font(.footnote)
-                    .foregroundStyle(StreamiStyle.muted)
-                    .padding(.horizontal, 20)
+                    .foregroundStyle(DS.muted)
+                    .padding(.horizontal, DS.gutter)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 13) {
-                        ForEach(items, id: \.listID) { item in
+                        ForEach(Array(items.enumerated()), id: \.element.listID) { index, item in
                             NavigationLink(value: item) {
-                                PosterTile(title: item)
+                                if ranked {
+                                    RankedPosterTile(title: item, rank: index + 1)
+                                } else {
+                                    PosterTile(title: item)
+                                }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableStyle())
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, DS.gutter)
                 }
             }
         }
@@ -438,32 +527,58 @@ struct PosterTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            KFImage(title.posterURL)
-                .placeholder {
-                Rectangle().fill(StreamiStyle.surface)
-                    .overlay(Image(systemName: "film").foregroundStyle(StreamiStyle.muted))
+            ZStack(alignment: .topTrailing) {
+                KFImage(title.posterURL)
+                    .placeholder {
+                        Rectangle().fill(DS.card)
+                            .overlay(Image(systemName: "film").foregroundStyle(DS.muted))
+                    }
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: DS.posterW, height: DS.posterH)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.radiusSmall))
+                if let rating = title.voteAverage {
+                    RatingBadge(rating: rating)
+                        .padding(7)
+                }
             }
-            .resizable()
-            .scaledToFill()
-            .frame(width: 132, height: 194)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
             Text(title.displayTitle)
                 .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.foreground)
                 .lineLimit(1)
-                .frame(width: 132, alignment: .leading)
+                .frame(width: DS.posterW, alignment: .leading)
             HStack(spacing: 5) {
-                if let rating = title.voteAverage {
-                    Image(systemName: "star.fill").foregroundStyle(.yellow)
-                    Text(rating.formatted(.number.precision(.fractionLength(1))))
-                }
+                Text(title.type == "tv" ? "Series" : "Movie")
                 if !title.year.isEmpty { Text("· \(title.year)") }
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(StreamiStyle.muted)
+            .foregroundStyle(DS.muted)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title.displayTitle), \(title.type == "tv" ? "series" : "movie")")
+    }
+}
+
+private struct RankedPosterTile: View {
+    let title: TMDBTitle
+    let rank: Int
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            Text("\(rank)")
+                .font(.system(size: 72, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .shadow(color: DS.accent.opacity(0.45), radius: 12)
+                .frame(width: 56)
+                .offset(y: 6)
+            PosterTile(title: title)
         }
         .contentShape(Rectangle())
     }
 }
+
+// MARK: - Search + Watchlist
 
 private struct SearchView: View {
     @Environment(AppServices.self) private var services
@@ -490,7 +605,7 @@ private struct SearchView: View {
                     symbol: "magnifyingglass"
                 )
             } else if services.search.isSearching {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                CatalogGridSkeleton()
             } else if let error = services.search.errorMessage {
                 ContentUnavailableView("Search unavailable", systemImage: "wifi.exclamationmark", description: Text(error))
             } else if services.search.results.isEmpty {
@@ -520,7 +635,7 @@ private struct SearchView: View {
                 }
             }
         }
-        .background(StreamiStyle.background)
+        .background(DS.background)
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Movies, shows, people")
         .toolbar {
@@ -560,12 +675,16 @@ private struct WatchlistView: View {
                 )
             } else {
                 ScrollView(showsIndicators: false) {
-                    CatalogPosterGrid(titles: services.watchlist.activeTitles)
-                        .padding(.top, 12)
+                    VStack(alignment: .leading, spacing: 20) {
+                        WatchStatsCard(titles: services.watchlist.activeTitles)
+                            .padding(.horizontal, 18)
+                        CatalogPosterGrid(titles: services.watchlist.activeTitles)
+                    }
+                    .padding(.top, 12)
                 }
             }
         }
-        .background(StreamiStyle.background)
+        .background(DS.background)
         .navigationTitle(activeCollection?.name ?? "My List")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -618,20 +737,100 @@ private struct WatchlistView: View {
     }
 }
 
+private struct WatchStatsCard: View {
+    let titles: [TMDBTitle]
+
+    private var ratings: [Double] {
+        titles.compactMap(\.voteAverage).filter { $0 > 0 }
+    }
+
+    private var buckets: [(label: String, count: Int)] {
+        let groups = ["< 6", "6–7", "7–8", "8+"]
+        var counts = [0, 0, 0, 0]
+        for rating in ratings {
+            switch rating {
+            case ..<6: counts[0] += 1
+            case ..<7: counts[1] += 1
+            case ..<8: counts[2] += 1
+            default: counts[3] += 1
+            }
+        }
+        return zip(groups, counts).map { ($0, $1) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Your list at a glance")
+                .font(DS.headline(15))
+                .foregroundStyle(DS.foreground)
+            HStack(spacing: 20) {
+                StatBlock(value: "\(titles.filter { $0.type == "movie" }.count)", label: "Movies")
+                StatBlock(value: "\(titles.filter { $0.type == "tv" }.count)", label: "Series")
+                if !ratings.isEmpty {
+                    StatBlock(
+                        value: (ratings.reduce(0, +) / Double(ratings.count)).formatted(.number.precision(.fractionLength(1))),
+                        label: "Avg rating"
+                    )
+                }
+            }
+            if !ratings.isEmpty {
+                Chart(buckets, id: \.label) { bucket in
+                    BarMark(
+                        x: .value("Rating", bucket.label),
+                        y: .value("Titles", bucket.count)
+                    )
+                    .foregroundStyle(DS.accent.gradient)
+                    .cornerRadius(4)
+                }
+                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel()
+                            .font(.caption2)
+                            .foregroundStyle(DS.muted)
+                    }
+                }
+                .frame(height: 110)
+                .accessibilityLabel("Rating distribution of your list")
+            }
+        }
+        .padding(16)
+        .background(DS.card, in: RoundedRectangle(cornerRadius: DS.radiusMedium))
+    }
+}
+
+private struct StatBlock: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(DS.display(24))
+                .foregroundStyle(DS.foreground)
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(DS.muted)
+        }
+    }
+}
+
+// MARK: - Shared bits
+
 private struct ErrorNotice: View {
     let message: String
     let retry: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(StreamiStyle.accent)
-            Text(message).font(.footnote).foregroundStyle(StreamiStyle.muted)
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(DS.accent)
+            Text(message).font(.footnote).foregroundStyle(DS.muted)
             Spacer(minLength: 0)
             Button("Retry", action: retry).font(.footnote.weight(.semibold))
         }
         .padding(14)
-        .background(StreamiStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 20)
+        .background(DS.card, in: RoundedRectangle(cornerRadius: DS.radiusSmall))
+        .padding(.horizontal, DS.gutter)
     }
 }
 
@@ -642,9 +841,9 @@ private struct FilterPill: View {
     var body: some View {
         Label(title, systemImage: symbol)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.82))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(StreamiStyle.surface, in: Capsule())
+            .foregroundStyle(DS.foreground.opacity(0.85))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(.white.opacity(0.08), in: Capsule())
     }
 }
