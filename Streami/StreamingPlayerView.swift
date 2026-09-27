@@ -205,7 +205,8 @@ struct StreamingPlayerView: View {
         switch type {
         case "timeupdate":
             if let currentTime = dict["currentTime"] as? TimeInterval,
-               let duration = dict["duration"] as? TimeInterval {
+               let duration = dict["duration"] as? TimeInterval,
+               currentTime.isFinite, duration.isFinite, duration > 1, currentTime > 0.5 {
                 self.currentTime = currentTime
                 self.duration = duration
                 self.hasPlayback = true
@@ -401,6 +402,14 @@ struct WebView: UIViewRepresentable {
     let onMessage: (Any) -> Void
     let savedProgress: WatchProgress?
     let shouldResume: Bool
+
+    /// Every source documents an <iframe> snippet — load the embed inside a
+    /// local iframe shell instead of as the top-level page.
+    static func iframeHTML(embedURL: URL) -> String {
+        """
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head><body><iframe src="\(embedURL.absoluteString)" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>
+        """
+    }
     
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -427,8 +436,7 @@ struct WebView: UIViewRepresentable {
         context.coordinator.shouldResume = shouldResume
         context.coordinator.loadedURL = url
         
-        let request = URLRequest(url: url)
-        webView.load(request)
+        webView.loadHTMLString(Self.iframeHTML(embedURL: url), baseURL: nil)
         
         return webView
     }
@@ -438,7 +446,7 @@ struct WebView: UIViewRepresentable {
         if context.coordinator.loadedURL != url {
             context.coordinator.loadedURL = url
             context.coordinator.hasInjectedScripts = false
-            webView.load(URLRequest(url: url))
+            webView.loadHTMLString(Self.iframeHTML(embedURL: url), baseURL: nil)
         }
     }
     

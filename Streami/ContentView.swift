@@ -38,31 +38,89 @@ private enum SearchFilter: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @Environment(AppServices.self) private var services
     @State private var showingSettings = false
+    @State private var tab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             NavigationStack {
                 HomeView(showingSettings: $showingSettings)
             }
-            .tabItem { Label("Discover", systemImage: "sparkles.tv") }
+            .tag(0)
 
             NavigationStack {
                 SearchView(showingSettings: $showingSettings)
             }
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            .tag(1)
 
             NavigationStack {
                 WatchlistView(showingSettings: $showingSettings)
             }
-            .tabItem { Label("My List", systemImage: "bookmark") }
-            .badge(services.watchlist.titles.count)
+            .tag(2)
         }
         .tint(DS.accent)
+        .toolbar(.hidden, for: .tabBar)
+        .overlay(alignment: .bottom) {
+            FloatingTabBar(selection: $tab, listCount: services.watchlist.titles.count)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+        }
         .task { await services.discover.load() }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
                 .presentationDetents([.medium, .large])
         }
+    }
+}
+
+private struct FloatingTabBar: View {
+    @Binding var selection: Int
+    let listCount: Int
+
+    private let tabs: [(Int, String, String, String)] = [
+        (0, "house", "house.fill", "Home"),
+        (1, "magnifyingglass", "magnifyingglass", "Search"),
+        (2, "bookmark", "bookmark.fill", "My List")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs, id: \.0) { tab in
+                Button {
+                    Haptics.select()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selection = tab.0
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: selection == tab.0 ? tab.2 : tab.1)
+                                .font(.system(size: 20, weight: .semibold))
+                            if tab.0 == 2, listCount > 0 {
+                                Text("\(min(listCount, 99))")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(DS.accent, in: Capsule())
+                                    .offset(x: 10, y: -8)
+                            }
+                        }
+                        Text(tab.3)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(selection == tab.0 ? DS.accent : DS.muted)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.3)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
     }
 }
 
@@ -148,7 +206,7 @@ private struct HomeView: View {
                     }
                 }
             }
-            .padding(.bottom, 30)
+            .padding(.bottom, 110)
         }
         .background(DS.background)
         .refreshable { await services.discover.load() }
@@ -584,60 +642,75 @@ private struct SearchView: View {
     @Environment(AppServices.self) private var services
     @Binding var showingSettings: Bool
     @State private var query = ""
-    @State private var filter = SearchFilter.all
+    @State private var selectedGenreID: Int? = nil
+
+    private var allGenres: [TMDBGenre] {
+        var seen = Set<Int>()
+        var ordered: [TMDBGenre] = []
+        for genre in services.discover.movieGenres + services.discover.showGenres
+            where seen.insert(genre.id).inserted {
+            ordered.append(genre)
+        }
+        return ordered.sorted { $0.name < $1.name }
+    }
+
+    private func matchesGenre(_ title: TMDBTitle) -> Bool {
+        guard let id = selectedGenreID else { return true }
+        return title.genreIDs?.contains(id) ?? false
+    }
+
+    private var browseTitles: [TMDBTitle] {
+        var seen = Set<String>()
+        var ordered: [TMDBTitle] = []
+        for title in services.discover.trending + services.discover.movies + services.discover.shows
+            where seen.insert(title.listID).inserted {
+            ordered.append(title)
+        }
+        return ordered.filter(matchesGenre)
+    }
 
     private var filteredResults: [TMDBTitle] {
-        switch filter {
-        case .all: services.search.results
-        case .movies: services.search.results.filter { $0.type == "movie" }
-        case .series: services.search.results.filter { $0.type == "tv" }
-        }
+        services.search.results.filter(matchesGenre)
     }
 
     var body: some View {
         Group {
             if services.session.credential.isEmpty {
                 WelcomeView { showingSettings = true }
-            } else if query.isEmpty {
-                CatalogEmptyState(
-                    title: "Find your next favorite",
-                    message: "Search movies and series by title.",
-                    symbol: "magnifyingglass"
-                )
-            } else if services.search.isSearching {
-                CatalogGridSkeleton()
-            } else if let error = services.search.errorMessage {
-                ContentUnavailableView("Search unavailable", systemImage: "wifi.exclamationmark", description: Text(error))
-            } else if services.search.results.isEmpty {
-                ContentUnavailableView.search(text: query)
             } else {
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 18) {
-                        Picker("Media type", selection: $filter) {
-                            ForEach(SearchFilter.allCases) { filter in
-                                Text(filter.rawValue).tag(filter)
+                    VStack(spacing: 14) {
+                        searchBar
+                        genreChips
+                        if query.isEmpty {
+                            if services.discover.isLoading && browseTitles.isEmpty {
+                                CatalogGridSkeleton()
+                            } else if browseTitles.isEmpty {
+                                CatalogEmptyState(
+                                    title: "Nothing to browse",
+                                    message: "Pull down to refresh or try again later.",
+                                    symbol: "film"
+                                )
+                            } else {
+                                CatalogPosterGrid(titles: browseTitles)
                             }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 12)
-
-                        if filteredResults.isEmpty {
-                            CatalogEmptyState(
-                                title: "No \(filter.rawValue.lowercased()) found",
-                                message: "Try another media type or search term.",
-                                symbol: "film"
-                            )
+                        } else if services.search.isSearching {
+                            CatalogGridSkeleton()
+                        } else if let error = services.search.errorMessage {
+                            ContentUnavailableView("Search unavailable", systemImage: "wifi.exclamationmark", description: Text(error))
+                        } else if filteredResults.isEmpty {
+                            ContentUnavailableView.search(text: query)
                         } else {
                             CatalogPosterGrid(titles: filteredResults)
                         }
                     }
+                    .padding(.top, 8)
+                    .padding(.bottom, 110)
                 }
+                .refreshable { await services.discover.load() }
             }
         }
         .background(DS.background)
-        .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Movies, shows, people")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showingSettings = true } label: {
@@ -646,6 +719,8 @@ private struct SearchView: View {
                 .accessibilityLabel("Settings")
             }
         }
+        .toolbarBackground(DS.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .task(id: query) {
             guard !query.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(300))
@@ -653,6 +728,63 @@ private struct SearchView: View {
             await services.search.search(query)
         }
         .navigationDestination(for: TMDBTitle.self) { DetailView(title: $0, services: services) }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(DS.muted)
+            TextField("Search movies, shows, genres...", text: $query)
+                .foregroundStyle(DS.foreground)
+                .tint(DS.accent)
+                .submitLabel(.search)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(DS.muted)
+                }
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(DS.card, in: Capsule())
+        .overlay(Capsule().stroke(DS.accent.opacity(0.65), lineWidth: 1.5))
+        .shadow(color: DS.accent.opacity(0.22), radius: 12)
+        .padding(.horizontal, DS.gutter)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Search movies, shows, genres")
+    }
+
+    private var genreChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(allGenres) { genre in
+                    let isActive = selectedGenreID == genre.id
+                    Button {
+                        Haptics.select()
+                        selectedGenreID = isActive ? nil : genre.id
+                    } label: {
+                        Text(genre.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(isActive ? DS.accent : .white.opacity(0.07), in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(isActive ? Color.clear : .white.opacity(0.14), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel("Filter by \(genre.name)")
+                }
+            }
+            .padding(.horizontal, DS.gutter)
+        }
     }
 }
 
@@ -681,6 +813,7 @@ private struct WatchlistView: View {
                         CatalogPosterGrid(titles: services.watchlist.activeTitles)
                     }
                     .padding(.top, 12)
+                    .padding(.bottom, 100)
                 }
             }
         }
