@@ -474,31 +474,34 @@ final class SearchViewModel {
     }
 }
 
-struct DetailViewModel {
+import Combine
+
+@MainActor
+final class DetailViewModel: ObservableObject {
     let title: TMDBTitle
-    let session: TMDBSession
-    let preferences: AppPreferences
-    let watchlist: WatchlistStore
-    var providerRegion: TMDBProviderRegion?
-    var isLoadingProviders = true
-    var providerError: String?
-    var recommendations: [TMDBTitle] = []
-    var similar: [TMDBTitle] = []
-    var recommendationsError: String?
-    var isLoadingRecommendations = true
-    var details: TMDBTitleDetails?
-    var isLoadingDetails = true
-    var detailsError: String?
-    var isLoadingTrailer = false
-    var imdbID: String?
-    var videos: [TMDBVideo] = []
-    var images: TMDBImages?
-    var reviews: TMDBReviewsPage?
-    var keywords: TMDBKeywords?
-    var releaseDates: TMDBReleaseDates?
-    var contentRatings: TMDBContentRatings?
-    var translations: TMDBTranslations?
-    var alternativeTitles: TMDBAlternativeTitles?
+    private let session: TMDBSession
+    private let preferences: AppPreferences
+    private let watchlist: WatchlistStore
+    @Published var providerRegion: TMDBProviderRegion?
+    @Published var isLoadingProviders = true
+    @Published var providerError: String?
+    @Published var recommendations: [TMDBTitle] = []
+    @Published var similar: [TMDBTitle] = []
+    @Published var recommendationsError: String?
+    @Published var isLoadingRecommendations = true
+    @Published var details: TMDBTitleDetails?
+    @Published var isLoadingDetails = true
+    @Published var detailsError: String?
+    @Published var isLoadingTrailer = false
+    @Published var imdbID: String?
+    @Published var videos: [TMDBVideo] = []
+    @Published var images: TMDBImages?
+    @Published var reviews: TMDBReviewsPage?
+    @Published var keywords: TMDBKeywords?
+    @Published var releaseDates: TMDBReleaseDates?
+    @Published var contentRatings: TMDBContentRatings?
+    @Published var translations: TMDBTranslations?
+    @Published var alternativeTitles: TMDBAlternativeTitles?
 
     init(title: TMDBTitle, session: TMDBSession, preferences: AppPreferences, watchlist: WatchlistStore) {
         self.title = title
@@ -532,7 +535,7 @@ struct DetailViewModel {
         details?.crew.filter { $0.job == "Creator" } ?? []
     }
 
-    mutating func loadSupportingData() async {
+    func loadSupportingData() async {
         isLoadingProviders = true
         isLoadingRecommendations = true
         isLoadingDetails = true
@@ -613,13 +616,13 @@ struct DetailViewModel {
         }
     }
 
-    mutating func trailerURL() async -> URL? {
+    func trailerURL() async -> URL? {
         isLoadingTrailer = true
         defer { isLoadingTrailer = false }
         return try? await session.client.trailerURL(for: title)
     }
     
-    mutating func toggleSaved() {
+    func toggleSaved() {
         watchlist.toggle(title)
     }
 }
