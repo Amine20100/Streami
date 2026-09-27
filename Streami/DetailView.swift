@@ -6,7 +6,7 @@ struct DetailView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.openURL) private var openURL
     let title: TMDBTitle
-    @StateObject private var model: DetailViewModel
+    @State private var model: DetailViewModel
     @State private var showSourceSelection = false
     @State private var selectedSeason: Int? = nil
     @State private var selectedEpisode: Int? = nil
@@ -19,7 +19,7 @@ struct DetailView: View {
 
     init(title: TMDBTitle, services: AppServices) {
         self.title = title
-        _model = StateObject(wrappedValue: DetailViewModel(
+        _model = State(wrappedValue: DetailViewModel(
             title: title,
             session: services.session,
             preferences: services.preferences,
