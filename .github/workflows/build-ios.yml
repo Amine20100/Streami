@@ -1,0 +1,73 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project Streami.xcodeproj -scheme Streami
+
+      - name: Run iOS simulator tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id="$(xcrun simctl list devices available -j | python3 -c 'import json, sys; data = json.load(sys.stdin); devices = [device for group in data["devices"].values() for device in group if device["isAvailable"] and device["name"].startswith("iPhone")]; print(devices[0]["udid"] if devices else "")')"
+          if [[ -z "$simulator_id" ]]; then
+            echo "No available iPhone simulator was found."
+            exit 1
+          fi
+          xcodebuild test \
+            -project Streami.xcodeproj \
+            -scheme Streami \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -parallel-testing-enabled NO
+
+      - name: Archive unsigned iOS app
+        run: >-
+          xcodebuild archive
+          -project Streami.xcodeproj
+          -scheme Streami
+          -destination "generic/platform=iOS"
+          -archivePath "$RUNNER_TEMP/Streami.xcarchive"
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/Streami.xcarchive/Products/Applications/Streami.app"
+          test -d "$app_path"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$app_path" "$RUNNER_TEMP/ipa/Payload/Streami.app"
+          cd "$RUNNER_TEMP/ipa"
+          ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/Streami-unsigned.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Streami-unsigned-ipa
+          path: Streami-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
