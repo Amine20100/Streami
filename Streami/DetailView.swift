@@ -372,6 +372,138 @@ struct DetailView: View {
         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 20)
     }
+
+private var tmdbDetailsSection: some View {
+        if let details = model.details {
+            VStack(alignment: .leading, spacing: 16) {
+                if let genres = details.genres, !genres.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Genres")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 20)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(genres) { genre in
+                                    Text(genre.name)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white.opacity(0.82))
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 7)
+                                        .background(.white.opacity(0.09), in: Capsule())
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                }
+
+                if let runtime = model.displayRuntime {
+                    Label(runtime, systemImage: "clock")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .padding(.horizontal, 20)
+                }
+
+                if let certification = model.certification {
+                    Label(certification, systemImage: "checkmark.shield")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 20)
+                }
+
+                if !model.directors.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(model.directors.count == 1 ? "Director" : "Directors")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 20)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(model.directors) { director in
+                                    VStack(spacing: 4) {
+                                        if let url = director.profileURL {
+                                            KFImage(url)
+                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(Circle())
+                                        } else {
+                                            Circle()
+                                                .fill(.white.opacity(0.1))
+                                                .frame(width: 60, height: 60)
+                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
+                                        }
+                                        Text(director.name)
+                                            .font(.caption.weight(.medium))
+                                            .lineLimit(2)
+                                            .frame(width: 70)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                }
+
+                if !model.creators.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Creators")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 20)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(model.creators) { creator in
+                                    VStack(spacing: 4) {
+                                        if let url = creator.profileURL {
+                                            KFImage(url)
+                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(Circle())
+                                        } else {
+                                            Circle()
+                                                .fill(.white.opacity(0.1))
+                                                .frame(width: 60, height: 60)
+                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
+                                        }
+                                        Text(creator.name)
+                                            .font(.caption.weight(.medium))
+                                            .lineLimit(2)
+                                            .frame(width: 70)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                }
+
+                if let status = details.status {
+                    Text(status.capitalized)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .padding(.horizontal, 20)
+                }
+
+                if let tagline = details.tagline, !tagline.isEmpty {
+                    Text(tagline)
+                        .font(.subheadline.italic())
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 20)
+                }
+
+                if let overview = details.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.body)
+                        .lineSpacing(5)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .padding(.horizontal, 20)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
 }
 
 // MARK: - Continue Watching Card
@@ -877,134 +1009,4 @@ struct ReviewCard: View {
     // MARK: - TMDB Details Section
 
     @ViewBuilder
-    private var tmdbDetailsSection: some View {
-        if let details = model.details {
-            VStack(alignment: .leading, spacing: 16) {
-                if let genres = details.genres, !genres.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Genres")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(genres) { genre in
-                                    Text(genre.name)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.82))
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 7)
-                                        .background(.white.opacity(0.09), in: Capsule())
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if let runtime = model.displayRuntime {
-                    Label(runtime, systemImage: "clock")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.horizontal, 20)
-                }
-
-                if let certification = model.certification {
-                    Label(certification, systemImage: "checkmark.shield")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 20)
-                }
-
-                if !model.directors.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(model.directors.count == 1 ? "Director" : "Directors")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(model.directors) { director in
-                                    VStack(spacing: 4) {
-                                        if let url = director.profileURL {
-                                            KFImage(url)
-                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(Circle())
-                                        } else {
-                                            Circle()
-                                                .fill(.white.opacity(0.1))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
-                                        }
-                                        Text(director.name)
-                                            .font(.caption.weight(.medium))
-                                            .lineLimit(2)
-                                            .frame(width: 70)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if !model.creators.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Creators")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 20)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(model.creators) { creator in
-                                    VStack(spacing: 4) {
-                                        if let url = creator.profileURL {
-                                            KFImage(url)
-                                                .placeholder { Circle().fill(.white.opacity(0.1)) }
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(Circle())
-                                        } else {
-                                            Circle()
-                                                .fill(.white.opacity(0.1))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.3)))
-                                        }
-                                        Text(creator.name)
-                                            .font(.caption.weight(.medium))
-                                            .lineLimit(2)
-                                            .frame(width: 70)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                }
-
-                if let status = details.status {
-                    Text(status.capitalized)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.horizontal, 20)
-                }
-
-                if let tagline = details.tagline, !tagline.isEmpty {
-                    Text(tagline)
-                        .font(.subheadline.italic())
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 20)
-                }
-
-                if let overview = details.overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(.body)
-                        .lineSpacing(5)
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(.horizontal, 20)
-                }
-            }
-            .padding(.horizontal, 20)
-        }
-    }
+    
