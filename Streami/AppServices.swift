@@ -474,7 +474,6 @@ final class SearchViewModel {
     }
 }
 
-@MainActor
 struct DetailViewModel {
     let title: TMDBTitle
     let session: TMDBSession
@@ -618,6 +617,10 @@ struct DetailViewModel {
         isLoadingTrailer = true
         defer { isLoadingTrailer = false }
         return try? await session.client.trailerURL(for: title)
+    }
+    
+    mutating func toggleSaved() {
+        watchlist.toggle(title)
     }
 }
 
