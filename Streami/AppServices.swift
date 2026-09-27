@@ -696,7 +696,7 @@ final class AppServices {
     init(
         credentialStore: any CredentialStoring = KeychainCredentialStore(),
         watchlistPersistence: any WatchlistPersisting = UserDefaultsWatchlistStore(),
-        watchlistCollectionPersistence: any WatchlistCollectionPersisting = UserDefaultsWatchlistCollectionPersisting(),
+        watchlistCollectionPersistence: any WatchlistCollectionPersisting = UserDefaultsWatchlistCollectionPersistence(),
         clientFactory: @escaping TMDBClientFactory = { TMDBClient(token: $0) },
         defaults: UserDefaults = .standard
     ) {
