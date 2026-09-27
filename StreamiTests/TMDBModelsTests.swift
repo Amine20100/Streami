@@ -153,7 +153,7 @@ final class TMDBModelsTests: XCTestCase {
 
         let services = AppServices(
           credentialStore: TestCredentialStore(),
-          watchlistPersistence: UserDefaultsWatchlistPersistence(defaults: defaults),
+          watchlistPersistence: UserDefaultsWatchlistStore(defaults: defaults),
           watchlistCollectionPersistence: UserDefaultsWatchlistCollectionPersistence(defaults: defaults),
           clientFactory: { _ in DelayedSearchService() },
           defaults: defaults
@@ -188,7 +188,17 @@ final class TMDBModelsTests: XCTestCase {
       func providers(for type: String, region: String) async throws -> [TMDBWatchProvider] { [] }
       func discover(type: String, filters: TMDBDiscoveryFilters, region: String) async throws -> [TMDBTitle] { [] }
       func details(for title: TMDBTitle) async throws -> TMDBTitleDetails {
-        TMDBTitleDetails(genres: nil, runtime: nil, episodeRunTime: nil, credits: nil, aggregateCredits: nil)
+        TMDBTitleDetails(
+          genres: nil, runtime: nil, episodeRunTime: nil, credits: nil, aggregateCredits: nil,
+          externalIDs: nil, videos: nil, images: nil, recommendations: nil, similar: nil,
+          reviews: nil, keywords: nil, releaseDates: nil, contentRatings: nil,
+          translations: nil, alternativeTitles: nil, status: nil, tagline: nil,
+          homepage: nil, productionCompanies: nil, productionCountries: nil,
+          spokenLanguages: nil, budget: nil, revenue: nil, originCountry: nil,
+          originalLanguage: nil, inProduction: nil, lastAirDate: nil,
+          nextEpisodeToAir: nil, numberOfSeasons: nil, numberOfEpisodes: nil,
+          seasons: nil, episodeGroups: nil, type: nil
+        )
       }
       func watchProviders(for title: TMDBTitle, region: String) async throws -> TMDBProviderRegion? { nil }
       func seasonDetails(showID: Int, seasonNumber: Int) async throws -> TMDBSeason {
