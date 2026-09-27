@@ -597,11 +597,7 @@ final class DetailViewModel: ObservableObject {
         }
         isLoadingDetails = false
 
-        do {
-            imdbID = try await imdbRequest?.imdb_id
-        } catch {
-            imdbID = nil
-        }
+        imdbID = (try? await imdbRequest)?.imdb_id
         
         do {
             videos = try await videosRequest

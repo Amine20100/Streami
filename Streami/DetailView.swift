@@ -6,20 +6,19 @@ struct DetailView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.openURL) private var openURL
     let title: TMDBTitle
-    @State private var model: DetailViewModel
+    @StateObject private var model: DetailViewModel
     @State private var showSourceSelection = false
     @State private var selectedSeason: Int? = nil
     @State private var selectedEpisode: Int? = nil
     @State private var showSeasonPicker = false
     @State private var showPlayer = false
     @State private var playerSource: StreamingSource?
-    @State private var playerURL: URL?
     @State private var playerSeason: Int?
     @State private var playerEpisode: Int?
 
     init(title: TMDBTitle, services: AppServices) {
         self.title = title
-        _model = State(wrappedValue: DetailViewModel(
+        _model = StateObject(wrappedValue: DetailViewModel(
             title: title,
             session: services.session,
             preferences: services.preferences,
@@ -195,7 +194,13 @@ struct DetailView: View {
                 title: title,
                 season: selectedSeason,
                 episode: selectedEpisode,
-                streamingSources: services.streamingSources
+                streamingSources: services.streamingSources,
+                onPlay: { source, season, episode in
+                    playerSource = source
+                    playerSeason = season
+                    playerEpisode = episode
+                    showPlayer = true
+                }
             )
         }
         .sheet(isPresented: $showSeasonPicker) {
@@ -225,25 +230,12 @@ struct DetailView: View {
     }
 
     private func setupNotificationObservers() {
-        NotificationCenter.default.addObserver(forName: .playStreamingSource, object: nil, queue: .main) { [self] notification in
-            if let source = notification.userInfo?["source"] as? StreamingSource,
-               let url = notification.userInfo?["url"] as? URL {
-                playerSource = source
-                playerURL = url
-                playerSeason = notification.userInfo?["season"] as? Int
-                playerEpisode = notification.userInfo?["episode"] as? Int
-                showPlayer = true
-            }
-        }
-
         NotificationCenter.default.addObserver(forName: .playNextEpisode, object: nil, queue: .main) { [self] notification in
             if let nextEpisode = notification.userInfo?["nextEpisode"] as? Int,
                let season = notification.userInfo?["season"] as? Int,
                let sourceID = notification.userInfo?["sourceID"] as? String,
-               let source = services.streamingSources.sources.first(where: { $0.id == sourceID }),
-               let url = services.streamingSources.getEmbedURL(for: sourceID, title: titleWithIMDB, season: season, episode: nextEpisode) {
+               let source = services.streamingSources.sources.first(where: { $0.id == sourceID }) {
                 playerSource = source
-                playerURL = url
                 playerSeason = season
                 playerEpisode = nextEpisode
                 showPlayer = true
@@ -297,9 +289,8 @@ struct DetailView: View {
                                 onTap: {
                                     if title.type == "tv" && selectedSeason == nil {
                                         showSeasonPicker = true
-                                    } else if let url = services.streamingSources.getEmbedURL(for: source.id, title: titleWithIMDB, season: selectedSeason, episode: selectedEpisode) {
+                                    } else if services.streamingSources.getEmbedURL(for: source.id, title: titleWithIMDB, season: selectedSeason, episode: selectedEpisode) != nil {
                                         playerSource = source
-                                        playerURL = url
                                         playerSeason = selectedSeason
                                         playerEpisode = selectedEpisode
                                         showPlayer = true
@@ -373,7 +364,8 @@ struct DetailView: View {
         .padding(.horizontal, 20)
     }
 
-private var tmdbDetailsSection: some View {
+    @ViewBuilder
+    private var tmdbDetailsSection: some View {
         if let details = model.details {
             VStack(alignment: .leading, spacing: 16) {
                 if let genres = details.genres, !genres.isEmpty {
@@ -668,6 +660,7 @@ struct SourceSelectionSheet: View {
     let season: Int?
     let episode: Int?
     let streamingSources: StreamingSourceManager
+    let onPlay: (StreamingSource, Int?, Int?) -> Void
     @State private var selectedSource: StreamingSource?
     @State private var useAutoSelect: Bool = true
 
@@ -746,20 +739,11 @@ struct SourceSelectionSheet: View {
                         if useAutoSelect {
                             if let result = streamingSources.getBestSourceURL(for: title, season: season, episode: episode) {
                                 dismiss()
-                                playerSource = result.1
-                                playerURL = result.0
-                                playerSeason = season
-                                playerEpisode = episode
-                                showPlayer = true
+                                onPlay(result.1, season, episode)
                             }
-                        } else if let source = selectedSource,
-                           let url = streamingSources.getEmbedURL(for: source.id, title: title, season: season, episode: episode) {
+                        } else if let source = selectedSource {
                             dismiss()
-                            playerSource = source
-                            playerURL = url
-                            playerSeason = season
-                            playerEpisode = episode
-                            showPlayer = true
+                            onPlay(source, season, episode)
                         }
                     }
                     .disabled(!useAutoSelect && selectedSource == nil)
@@ -978,11 +962,10 @@ struct ReviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                if let author = review.authorDetails?.name ?? review.author {
-                    Text(author)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
+                let author = review.authorDetails?.name ?? review.author
+                Text(author)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
                 Spacer()
                 if let rating = review.authorDetails?.rating {
                     Text(String(format: "%.1f/10", rating))
@@ -1005,8 +988,3 @@ struct ReviewCard: View {
         .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
 }
-
-// MARK: - TMDB Details Section
-
-    @ViewBuilder
-    

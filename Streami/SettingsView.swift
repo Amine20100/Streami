@@ -64,7 +64,7 @@ struct SettingsView: View {
                         .padding(.top, 4)
 
                     ForEach(services.streamingSources.sources) { source in
-                        SourceToggleRow(source: source) { updatedSource in
+                        SourceToggleRow(source: source, isHealthy: services.streamingSources.sourceHealthStatus[source.id]?.isHealthy) { updatedSource in
                             services.streamingSources.updateSource(updatedSource)
                         }
                     }
@@ -137,6 +137,7 @@ struct SettingsView: View {
 
 private struct SourceToggleRow: View {
     let source: StreamingSource
+    let isHealthy: Bool?
     let onUpdate: (StreamingSource) -> Void
 
     var body: some View {
@@ -166,10 +167,10 @@ private struct SourceToggleRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if let health = services.streamingSources.sourceHealthStatus[source.id] {
-                        Label(health.isHealthy ? "✓ Healthy" : "⚠ Issues", systemImage: health.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    if let isHealthy {
+                        Label(isHealthy ? "✓ Healthy" : "⚠ Issues", systemImage: isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(health.isHealthy ? .green : .orange)
+                            .foregroundStyle(isHealthy ? .green : .orange)
                     }
                 }
             }
