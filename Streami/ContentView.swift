@@ -216,12 +216,14 @@ private struct HomeView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 22) {
                 if services.session.credential.isEmpty {
+                    brandRow
+                        .padding(.top, 8)
                     WelcomeView { showingSettings = true }
                 } else {
                     if !heroTitles.isEmpty {
-                        HeroCarousel(titles: heroTitles)
+                        HeroCarousel(titles: heroTitles, showingSettings: $showingSettings)
                     } else if services.discover.isLoading {
                         HeroSkeleton()
                     }
@@ -243,18 +245,28 @@ private struct HomeView: View {
 
                     switch mode {
                     case .forYou:
-                        MediaShelf(title: "Trending now", subtitle: "What everyone is watching", items: services.discover.trending, isLoading: services.discover.isLoading, ranked: true)
-                        MediaShelf(title: "Trending movies", items: services.discover.trendingMovies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Trending series", items: services.discover.trendingShows, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Top rated movies", items: services.discover.topRatedMovies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Now playing", items: services.discover.nowPlayingMovies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Coming soon", items: services.discover.upcomingMovies, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Popular series", items: services.discover.shows, isLoading: services.discover.isLoading)
-                        MediaShelf(title: "Top rated series", items: services.discover.topRatedShows, isLoading: services.discover.isLoading)
-                        let pickedForYou = services.discover.personalizedTitles(from: services.watchlist.titles)
-                        if !pickedForYou.isEmpty {
-                            MediaShelf(title: "Picked for you", subtitle: "Based on your list", items: pickedForYou, isLoading: false)
-                        }
+                        let trending10 = Array(services.discover.trending.prefix(10))
+                        MediaShelf(
+                            title: "Trending Now",
+                            items: trending10,
+                            fullList: services.discover.trending,
+                            isLoading: services.discover.isLoading
+                        )
+                        let personalized = services.discover.personalizedTitles(from: services.watchlist.titles)
+                        let picks = personalized.isEmpty ? services.discover.topRatedMovies : personalized
+                        let picks10 = Array(picks.prefix(10))
+                        MediaShelf(
+                            title: "Top Picks For You",
+                            items: picks10,
+                            fullList: picks,
+                            isLoading: services.discover.isLoading && picks.isEmpty
+                        )
+                        Top10Shelf(
+                            title: "Top 10 Today",
+                            items: trending10,
+                            fullList: services.discover.trending,
+                            isLoading: services.discover.isLoading
+                        )
                     case .movies:
                         catalogGrid(title: "Movies")
                     case .series:
@@ -262,48 +274,50 @@ private struct HomeView: View {
                     }
 
                     if !services.watchlist.titles.isEmpty {
-                        MediaShelf(title: "My List", items: services.watchlist.titles, isLoading: false)
+                        MediaShelf(title: "My List", items: services.watchlist.titles, fullList: services.watchlist.titles, isLoading: false)
                     }
                 }
             }
             .padding(.bottom, 110)
         }
         .background(DS.background)
+        .ignoresSafeArea(edges: .top)
         .refreshable { await services.discover.load() }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(DS.accent)
-                            .frame(width: 26, height: 26)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    Text("streami")
-                        .font(DS.display(21))
-                        .foregroundStyle(DS.foreground)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showingSettings = true } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(DS.foreground)
-                        .frame(width: 38, height: 38)
-                        .background(.white.opacity(0.08), in: Circle())
-                }
-                .accessibilityLabel("Settings")
-            }
-        }
-        .toolbarBackground(DS.background, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: TMDBTitle.self) { DetailView(title: $0, services: services) }
+        .navigationDestination(for: ShelfSeeAll.self) { target in
+            ShelfSeeAllView(title: target.title, items: target.items)
+        }
         .task(id: catalogRequestKey) {
             guard mode == .movies || mode == .series else { return }
             await services.discover.loadCatalog(type: catalogType, filters: discoveryFilters)
         }
+    }
+
+    private var brandRow: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(DS.accent)
+                    .frame(width: 26, height: 26)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            Text("streami")
+                .font(DS.display(21))
+                .foregroundStyle(DS.foreground)
+            Spacer()
+            Button { showingSettings = true } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DS.foreground)
+                    .frame(width: 38, height: 38)
+                    .background(.white.opacity(0.08), in: Circle())
+            }
+            .accessibilityLabel("Settings")
+        }
+        .padding(.horizontal, DS.gutter)
     }
 
     @ViewBuilder
@@ -463,39 +477,67 @@ private struct StreamiAnimation: View {
     }
 }
 
-// MARK: - Paging hero carousel
+// MARK: - Full-bleed cinematic hero
 
 private struct HeroCarousel: View {
     let titles: [TMDBTitle]
+    @Binding var showingSettings: Bool
     @State private var selection = 0
 
     var body: some View {
         VStack(spacing: 10) {
-            TabView(selection: $selection) {
-                ForEach(Array(titles.enumerated()), id: \.element.listID) { index, title in
-                    HeroCard(title: title, rank: index + 1)
-                        .tag(index)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: DS.heroHome)
-            .clipShape(RoundedRectangle(cornerRadius: DS.radiusLarge))
-            .padding(.horizontal, DS.gutter)
-            .task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(6))
-                    guard titles.count > 1, !UIAccessibility.isReduceMotionEnabled else { continue }
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        selection = (selection + 1) % titles.count
+            ZStack(alignment: .top) {
+                TabView(selection: $selection) {
+                    ForEach(Array(titles.enumerated()), id: \.element.listID) { index, title in
+                        HeroCard(title: title)
+                            .tag(index)
                     }
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: 520)
+                .clipped()
+                .task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(6))
+                        guard titles.count > 1, !UIAccessibility.isReduceMotionEnabled else { continue }
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            selection = (selection + 1) % titles.count
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(DS.accent)
+                            .frame(width: 26, height: 26)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("streami")
+                        .font(DS.display(21))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 6)
+                    Spacer()
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                    .accessibilityLabel("Settings")
+                }
+                .padding(.horizontal, DS.gutter)
+                .padding(.top, 58)
             }
 
             HStack(spacing: 6) {
                 ForEach(titles.indices, id: \.self) { index in
-                    Capsule()
-                        .fill(index == selection ? DS.accent : .white.opacity(0.22))
-                        .frame(width: index == selection ? 22 : 6, height: 6)
+                    Circle()
+                        .fill(index == selection ? .white : .white.opacity(0.28))
+                        .frame(width: 6, height: 6)
                         .animation(.easeInOut(duration: 0.25), value: selection)
                 }
             }
@@ -505,9 +547,7 @@ private struct HeroCarousel: View {
 }
 
 private struct HeroCard: View {
-    @Environment(AppServices.self) private var services
     let title: TMDBTitle
-    let rank: Int
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -518,98 +558,130 @@ private struct HeroCard: View {
                 .resizable()
                 .scaledToFill()
                 .frame(maxWidth: .infinity)
-                .frame(height: DS.heroHome)
+                .frame(height: 520)
                 .clipped()
 
             LinearGradient(
-                colors: [.clear, .black.opacity(0.35), .black.opacity(0.92)],
-                startPoint: .center,
+                colors: [.black.opacity(0.45), .clear, .clear, .black.opacity(0.55), DS.background],
+                startPoint: .top,
                 endPoint: .bottom
             )
 
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text("TRENDING #\(rank)")
-                        .font(DS.eyebrow)
-                        .tracking(1.5)
-                        .foregroundStyle(DS.accent)
-                    if let rating = title.voteAverage {
-                        RatingBadge(rating: rating)
-                    }
-                }
-                Text(title.displayTitle)
-                    .font(DS.display(32))
+                Text(title.type == "tv" ? "A STREAMI SERIES" : "A STREAMI FILM")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(3)
+                    .foregroundStyle(DS.accent)
+                Text(title.displayTitle.uppercased())
+                    .font(.system(size: 44, weight: .black))
+                    .fontWidth(.compressed)
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                HStack(spacing: 8) {
-                    if !title.year.isEmpty { MetaPill(text: title.year) }
-                    MetaPill(text: title.type == "tv" ? "Series" : "Movie", systemImage: title.type == "tv" ? "tv" : "film")
+                    .minimumScaleFactor(0.7)
+                    .shadow(color: .black.opacity(0.6), radius: 10)
+                HStack(spacing: 6) {
+                    if let rating = title.voteAverage, rating > 0 {
+                        Text(String(format: "%.1f", rating))
+                            .foregroundStyle(DS.gold)
+                    }
+                    if !title.year.isEmpty { Text(title.year) }
+                    Text(title.type == "tv" ? "Series" : "Movie")
                 }
-                HStack(spacing: 10) {
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                HStack(spacing: 12) {
                     NavigationLink(value: title) {
-                        Label("Watch now", systemImage: "play.fill")
-                            .font(.system(size: 14, weight: .semibold))
+                        Label("Play", systemImage: "play.fill")
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
                             .background(DS.accent, in: Capsule())
                     }
                     .buttonStyle(PressableStyle())
-                    Button {
-                        Haptics.tap()
-                        services.watchlist.toggle(title)
-                    } label: {
-                        Image(systemName: services.watchlist.contains(title) ? "checkmark" : "plus")
-                            .font(.system(size: 15, weight: .bold))
+                    NavigationLink(value: title) {
+                        Label("More Info", systemImage: "info.circle")
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.white.opacity(0.16), in: Circle())
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .overlay(Capsule().stroke(.white.opacity(0.5), lineWidth: 1.2))
+                            .background(.white.opacity(0.08), in: Capsule())
                     }
                     .buttonStyle(PressableStyle())
-                    .accessibilityLabel(services.watchlist.contains(title) ? "In My List" : "Add to My List")
                 }
-                .padding(.top, 4)
+                .padding(.top, 6)
             }
             .padding(.horizontal, 22)
-            .padding(.bottom, 26)
+            .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: DS.heroHome)
+        .frame(height: 520)
         .clipped()
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title.displayTitle)
     }
 }
 
 private struct HeroSkeleton: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: DS.radiusLarge)
+        Rectangle()
             .fill(DS.card)
-            .frame(height: DS.heroHome)
-            .padding(.horizontal, DS.gutter)
+            .frame(height: 520)
             .shimmer()
             .accessibilityLabel("Loading featured titles")
     }
 }
 
-// MARK: - Shelves
+// MARK: - Shelves (Netflix style)
+
+/// Red section header with a "See All" link, like the reference design.
+private struct NetflixSectionHeader: View {
+    let title: String
+    var target: ShelfSeeAll?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(DS.accent)
+            Spacer()
+            if let target {
+                NavigationLink(value: target) {
+                    HStack(spacing: 4) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                }
+                .buttonStyle(PressableStyle())
+            }
+        }
+        .padding(.horizontal, DS.gutter)
+        .accessibilityElement(children: .combine)
+    }
+}
 
 private struct MediaShelf: View {
     let title: String
-    var subtitle: String?
     let items: [TMDBTitle]
+    let fullList: [TMDBTitle]
     let isLoading: Bool
-    var ranked: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(title: title, subtitle: subtitle)
+        VStack(alignment: .leading, spacing: 12) {
+            NetflixSectionHeader(title: title, target: items.isEmpty ? nil : ShelfSeeAll(title: title, items: fullList))
 
             if items.isEmpty && isLoading {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 13) {
+                    HStack(spacing: 10) {
                         ForEach(0..<5, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: DS.radiusSmall)
+                            RoundedRectangle(cornerRadius: 8)
                                 .fill(DS.card)
-                                .frame(width: DS.posterW, height: DS.posterH)
+                                .frame(width: 112, height: 168)
                                 .shimmer()
                         }
                     }
@@ -623,13 +695,76 @@ private struct MediaShelf: View {
                     .padding(.horizontal, DS.gutter)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 13) {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(items, id: \.listID) { item in
+                            NavigationLink(value: item) {
+                                HomePosterCard(title: item)
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
+                    }
+                    .padding(.horizontal, DS.gutter)
+                }
+            }
+        }
+    }
+}
+
+/// Poster-only card with a red-tinted border, no captions.
+private struct HomePosterCard: View {
+    let title: TMDBTitle
+
+    var body: some View {
+        KFImage(title.posterURL)
+            .placeholder {
+                Rectangle()
+                    .fill(DS.card)
+                    .overlay(Image(systemName: "film").foregroundStyle(DS.muted))
+            }
+            .resizable()
+            .scaledToFill()
+            .frame(width: 112, height: 168)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(DS.accent.opacity(0.35), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .accessibilityLabel(title.displayTitle)
+    }
+}
+
+private struct Top10Shelf: View {
+    let title: String
+    let items: [TMDBTitle]
+    let fullList: [TMDBTitle]
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NetflixSectionHeader(title: title, target: items.isEmpty ? nil : ShelfSeeAll(title: title, items: fullList))
+
+            if items.isEmpty && isLoading {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(0..<5, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(DS.card)
+                                .frame(width: 150, height: 168)
+                                .shimmer()
+                        }
+                    }
+                    .padding(.horizontal, DS.gutter)
+                }
+                .accessibilityLabel("Loading \(title)")
+            } else if !items.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .bottom, spacing: 6) {
                         ForEach(Array(items.enumerated()), id: \.element.listID) { index, item in
                             NavigationLink(value: item) {
-                                if ranked {
-                                    RankedPosterTile(title: item, rank: index + 1)
-                                } else {
-                                    PosterTile(title: item)
+                                HStack(alignment: .bottom, spacing: -14) {
+                                    Top10Number(rank: index + 1)
+                                    HomePosterCard(title: item)
                                 }
                             }
                             .buttonStyle(PressableStyle())
@@ -639,6 +774,55 @@ private struct MediaShelf: View {
                 }
             }
         }
+    }
+}
+
+/// Hollow red-outlined rank numeral (layered offsets behind a dark fill).
+private struct Top10Number: View {
+    let rank: Int
+    private let f: Font = .system(size: 92, weight: .black, design: .rounded)
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<8, id: \.self) { i in
+                let o = [CGSize(width: 2, height: 0), CGSize(width: -2, height: 0), CGSize(width: 0, height: 2), CGSize(width: 0, height: -2), CGSize(width: 1.5, height: 1.5), CGSize(width: -1.5, height: 1.5), CGSize(width: 1.5, height: -1.5), CGSize(width: -1.5, height: -1.5)][i]
+                Text("\(rank)")
+                    .font(f)
+                    .foregroundStyle(DS.accent)
+                    .offset(o)
+            }
+            Text("\(rank)")
+                .font(f)
+                .foregroundStyle(Color(red: 0.08, green: 0.02, blue: 0.03))
+        }
+        .frame(width: 64)
+        .offset(y: 8)
+        .accessibilityHidden(true)
+    }
+}
+
+struct ShelfSeeAll: Hashable {
+    let title: String
+    let items: [TMDBTitle]
+}
+
+private struct ShelfSeeAllView: View {
+    @Environment(AppServices.self) private var services
+    let title: String
+    let items: [TMDBTitle]
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            CatalogPosterGrid(titles: items)
+                .padding(.top, 12)
+                .padding(.bottom, 110)
+        }
+        .background(DS.background)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(DS.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .navigationDestination(for: TMDBTitle.self) { DetailView(title: $0, services: services) }
     }
 }
 
@@ -677,24 +861,6 @@ struct PosterTile: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title.displayTitle), \(title.type == "tv" ? "series" : "movie")")
-    }
-}
-
-private struct RankedPosterTile: View {
-    let title: TMDBTitle
-    let rank: Int
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            Text("\(rank)")
-                .font(.system(size: 72, weight: .black, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .shadow(color: DS.accent.opacity(0.45), radius: 12)
-                .frame(width: 56)
-                .offset(y: 6)
-            PosterTile(title: title)
-        }
-        .contentShape(Rectangle())
     }
 }
 
