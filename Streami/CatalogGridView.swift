@@ -47,42 +47,41 @@ private struct CatalogPosterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                ZStack(alignment: .bottomLeading) {
-                    KFImage(title.posterURL)
-                        .placeholder {
-                            Rectangle()
-                                .fill(CatalogGridStyle.surface)
-                                .overlay {
-                                    Image(systemName: "film")
-                                        .font(.title2)
-                                        .foregroundStyle(CatalogGridStyle.muted)
-                                }
-                        }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.64)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-
-                    if let rating = title.voteAverage {
-                        Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(.black.opacity(0.58), in: Capsule())
-                            .padding(9)
+            ZStack(alignment: .bottomLeading) {
+                KFImage(title.posterURL)
+                    .placeholder {
+                        Rectangle()
+                            .fill(CatalogGridStyle.surface)
+                            .overlay {
+                                Image(systemName: "film")
+                                    .font(.title2)
+                                    .foregroundStyle(CatalogGridStyle.muted)
+                            }
                     }
-                }
+                    .resizable()
+                    .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .aspectRatio(2 / 3, contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipped()
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.64)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                if let rating = title.voteAverage {
+                    Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.58), in: Capsule())
+                        .padding(9)
+                }
             }
-            .aspectRatio(2 / 3, contentMode: .fit)
 
             Text(title.displayTitle)
                 .font(.system(size: 13, weight: .semibold))

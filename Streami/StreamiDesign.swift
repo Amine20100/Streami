@@ -26,7 +26,9 @@ enum DS {
     static let radiusMedium: CGFloat = 12
     static let radiusLarge: CGFloat = 20
     static let posterW: CGFloat = 132
-    static let posterH: CGFloat = 194
+    static let posterH: CGFloat = 198
+    static let heroHome: CGFloat = 400
+    static let heroDetail: CGFloat = 260
 
     // MARK: Type
     static func display(_ size: CGFloat) -> Font {

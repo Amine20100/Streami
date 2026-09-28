@@ -111,9 +111,12 @@ struct DetailView: View {
                 Text("Streami is a discovery guide. Streaming sources are third-party and may not be available in all regions.")
                     .font(.caption)
                     .foregroundStyle(DS.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, DS.gutter)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 110)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(DS.background)
         .ignoresSafeArea(edges: .top)
@@ -241,8 +244,10 @@ struct DetailView: View {
             }
             .resizable()
             .scaledToFill()
-            .frame(height: 400)
+            .frame(maxWidth: .infinity)
+            .frame(height: DS.heroDetail)
             .clipped()
+            .contentShape(Rectangle())
             .overlay {
                 LinearGradient(colors: [.clear, DS.background.opacity(0.55), DS.background], startPoint: .center, endPoint: .bottom)
             }
@@ -255,6 +260,8 @@ struct DetailView: View {
                 .font(DS.display(26))
                 .foregroundStyle(.white)
                 .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 if !title.year.isEmpty {
                     Text(title.year)
@@ -285,6 +292,7 @@ struct DetailView: View {
                     .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, DS.gutter)
     }
 
@@ -293,10 +301,13 @@ struct DetailView: View {
             Button(action: playEffective) {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
                     .frame(height: 56)
                     .background(DS.accent, in: Capsule())
+                    .contentShape(Capsule())
             }
             .buttonStyle(PressableStyle())
             .accessibilityHint("Starts playback with the selected source")
@@ -307,17 +318,21 @@ struct DetailView: View {
             } label: {
                 Label(model.isSaved ? "Saved" : "My List", systemImage: model.isSaved ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
                     .frame(height: 56)
                     .overlay(
                         Capsule()
                             .stroke(.white.opacity(0.35), lineWidth: 1)
                     )
+                    .contentShape(Capsule())
             }
             .buttonStyle(PressableStyle())
             .accessibilityLabel(model.isSaved ? "Remove from My List" : "Add to My List")
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, DS.gutter)
     }
 
@@ -367,6 +382,8 @@ struct DetailView: View {
                     .font(.system(size: 15))
                     .lineSpacing(4)
                     .foregroundStyle(DS.foreground.opacity(0.88))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, DS.gutter)
             }
         }

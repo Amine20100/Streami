@@ -45,7 +45,6 @@ struct CatalogDetailView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.horizontal, 20)
-
                 if let details = model.details {
                     if let genres = details.genres, !genres.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -99,6 +98,8 @@ struct CatalogDetailView: View {
                         .font(.body)
                         .lineSpacing(5)
                         .foregroundStyle(.white.opacity(0.82))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 20)
                 }
 
@@ -109,9 +110,12 @@ struct CatalogDetailView: View {
                 Text("Streami is a discovery guide. TMDB lists availability; playback is provided by licensed services.")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 100)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(red: 0.035, green: 0.045, blue: 0.06))
         .ignoresSafeArea(edges: .top)
@@ -130,8 +134,10 @@ struct CatalogDetailView: View {
                 }
                 .resizable()
                 .scaledToFill()
-                .frame(height: 300)
+                .frame(maxWidth: .infinity)
+                .frame(height: 240)
                 .clipped()
+                .contentShape(Rectangle())
             LinearGradient(
                 colors: [.clear, Color(red: 0.035, green: 0.045, blue: 0.06)],
                 startPoint: .center,
@@ -140,9 +146,13 @@ struct CatalogDetailView: View {
             Text(title.displayTitle)
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
         }
+        .frame(maxWidth: .infinity)
+        .clipped()
     }
 
     @ViewBuilder

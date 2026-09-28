@@ -82,6 +82,15 @@ struct StreamingPlayerView: View {
                     Text("Loading \(source.name)...")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.8))
+                    Button("Try another source") {
+                        onSourceFailed?()
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+                    .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.black.opacity(0.8))
@@ -160,6 +169,16 @@ struct StreamingPlayerView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
+                    Button {
+                        onSourceFailed?()
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(.black.opacity(0.4), in: Circle())
+                    }
+                    .accessibilityLabel("Try next source")
                     if title.type == "tv" && season != nil && episode != nil {
                         Button {
                             playNextEpisode()
@@ -186,13 +205,6 @@ struct StreamingPlayerView: View {
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .task {
-            // Fail over if nothing actually plays within 30 seconds.
-            try? await Task.sleep(for: .seconds(30))
-            if !hasPlayback {
-                onSourceFailed?()
-            }
-        }
         .onDisappear {
             commitProgress()
         }
@@ -403,30 +415,37 @@ struct WebView: UIViewRepresentable {
     let savedProgress: WatchProgress?
     let shouldResume: Bool
 
-    /// Every source documents an <iframe> snippet — load the embed inside a
-    /// local iframe shell instead of as the top-level page.
-    static func iframeHTML(embedURL: URL) -> String {
-        """
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head><body><iframe src="\(embedURL.absoluteString)" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>
-        """
+    /// Embed pages are full player documents (several nest further iframes
+    /// themselves). Load them as the top-level page so they get a real
+    /// origin/referrer — wrapping them in a local about:blank iframe shell
+    /// breaks players that check framing context and yields a black screen.
+    static func directRequest(embedURL: URL) -> URLRequest {
+        var request = URLRequest(url: embedURL)
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        return request
     }
-    
+
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.allowsPictureInPictureMediaPlayback = true
-        
+        configuration.allowsAirPlayForMediaPlayback = true
+
         // Add message handler for postMessage from iframe
         configuration.userContentController.add(context.coordinator, name: "player")
-        
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.backgroundColor = .black
-        webView.isOpaque = false
-        
+        webView.isOpaque = true
+        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
         context.coordinator.webView = webView
         context.coordinator.onProgress = onProgress
         context.coordinator.onMessage = onMessage
@@ -435,18 +454,18 @@ struct WebView: UIViewRepresentable {
         context.coordinator.savedProgress = savedProgress
         context.coordinator.shouldResume = shouldResume
         context.coordinator.loadedURL = url
-        
-        webView.loadHTMLString(Self.iframeHTML(embedURL: url), baseURL: nil)
-        
+
+        webView.load(Self.directRequest(embedURL: url))
+
         return webView
     }
-    
+
     func updateUIView(_ webView: WKWebView, context: Context) {
         // Reload when the parent switches to a different source URL.
         if context.coordinator.loadedURL != url {
             context.coordinator.loadedURL = url
             context.coordinator.hasInjectedScripts = false
-            webView.loadHTMLString(Self.iframeHTML(embedURL: url), baseURL: nil)
+            webView.load(Self.directRequest(embedURL: url))
         }
     }
     
@@ -605,6 +624,7 @@ struct WebView: UIViewRepresentable {
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard (error as NSError).code != NSURLErrorCancelled else { return }
             isLoading?.wrappedValue = false
             self.error?.wrappedValue = error.localizedDescription
             progressObservation?.invalidate()
@@ -612,10 +632,32 @@ struct WebView: UIViewRepresentable {
         }
         
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard (error as NSError).code != NSURLErrorCancelled else { return }
             isLoading?.wrappedValue = false
             self.error?.wrappedValue = error.localizedDescription
             progressObservation?.invalidate()
             onMessage?(["type": "loadError"])
+        }
+
+        /// WKWebView treats an HTTP 404/502 page as a *successful* navigation,
+        /// which previously left the user staring at a black screen with no
+        /// failover. Catch error statuses on the main frame and advance.
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationResponse: WKNavigationResponse,
+            decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        ) {
+            if navigationResponse.isForMainFrame,
+               let http = navigationResponse.response as? HTTPURLResponse,
+               http.statusCode >= 400 {
+                isLoading?.wrappedValue = false
+                self.error?.wrappedValue = "Source returned HTTP \(http.statusCode)"
+                progressObservation?.invalidate()
+                decisionHandler(.cancel)
+                onMessage?(["type": "loadError"])
+                return
+            }
+            decisionHandler(.allow)
         }
         
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
